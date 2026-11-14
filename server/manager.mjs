@@ -112,6 +112,7 @@ export class MinecraftManager {
   async update(id,input) {
     const cfg=this.get(id);
     assert(!this.active.has(id),409,"서버가 실행 중일 때는 시작 설정을 변경할 수 없습니다.");
+    assert(!this.busy.has(id),409,"백업/복원 작업 중에는 설정을 변경할 수 없습니다.");
     const old={...cfg};
     if(input.name!==undefined)cfg.name=safeName(input.name);
     if(input.memoryMb!==undefined)cfg.memoryMb=positiveInt(input.memoryMb,"메모리",JAVA_MEMORY_MIN,JAVA_MEMORY_MAX);
@@ -127,6 +128,7 @@ export class MinecraftManager {
   async start(id){
     const cfg=this.get(id);
     assert(!this.active.has(id),409,"서버가 이미 실행 중입니다.");
+    assert(!this.busy.has(id),409,"백업/복원 중에는 서버를 시작할 수 없습니다.");
     assert(cfg.eulaAccepted,409,"Minecraft EULA 동의가 필요합니다.");
     const folder=this.dir(id);
     let jar;
@@ -260,6 +262,7 @@ export class MinecraftManager {
   }
   async upload(id,sub,req){
     assert(!this.active.has(id),409,"파일 수정 전 서버를 중지하세요.");
+    assert(!this.busy.has(id),409,"백업/복원 중에는 파일을 수정할 수 없습니다.");
     const path=await confinedPath(this.dir(id),sub,{missing:true});
     assert(sub && sub!==".",400,"파일 이름을 지정하세요.");
     await mkdir(dirname(path),{recursive:true});
@@ -279,12 +282,14 @@ export class MinecraftManager {
   }
   async mkdir(id,sub) {
     assert(!this.active.has(id),409,"파일 수정 전 서버를 중지하세요.");
+    assert(!this.busy.has(id),409,"백업/복원 중에는 파일을 수정할 수 없습니다.");
     const path=await confinedPath(this.dir(id),sub,{missing:true});
     assert(sub && sub!==".",400,"폴더 이름을 지정하세요.");
     await mkdir(path,{recursive:false});return {created:true};
   }
   async removeFile(id,sub) {
     assert(!this.active.has(id),409,"파일 수정 전 서버를 중지하세요.");
+    assert(!this.busy.has(id),409,"백업/복원 중에는 파일을 수정할 수 없습니다.");
     assert(sub && sub!==".",400,"삭제할 파일을 선택하세요.");
     const path=await confinedPath(this.dir(id),sub);
     const info=await lstat(path);
@@ -293,6 +298,7 @@ export class MinecraftManager {
   }
   async renameFile(id,from,to){
     assert(!this.active.has(id),409,"파일 수정 전 서버를 중지하세요.");
+    assert(!this.busy.has(id),409,"백업/복원 중에는 파일을 수정할 수 없습니다.");
     const a=await confinedPath(this.dir(id),from),b=await confinedPath(this.dir(id),to,{missing:true});
     assert(from && to,400,"경로가 필요합니다.");
     assert(dirname(a)===dirname(b),400,"같은 폴더 내 이름 변경만 지원합니다.");
@@ -334,8 +340,10 @@ export class MinecraftManager {
     const bid=makeId(),backupDir=join(this.backupsDir,id,bid);
     try{
       const {size,count}=await this.scanTree(folder);
-      const space=await statfs(this.root);
-      assert(Number(space.bavail)*Number(space.bsize)>size+256*1024*1024,507,"저장 공간이 부족합니다.");
+      let space=null;
+      try{space=await statfs(this.root);}
+      catch(error){if(!["ENOSYS","ENOTSUP","EOPNOTSUPP"].includes(error.code))throw error;}
+      if(space)assert(Number(space.bavail)*Number(space.bsize)>size+256*1024*1024,507,"저장 공간이 부족합니다.");
       await mkdir(backupDir,{recursive:true,mode:0o700});
       await this.copyTree(folder,join(backupDir,"files"));
       const meta={id:bid,serverId:id,createdAt:now(),size,files:count};
@@ -350,7 +358,7 @@ export class MinecraftManager {
     if(wasRunning){await this.stop(id);await this.waitForStop(id);}
     try{return await this.backup(id);}
     finally{
-      if(wasRunning){
+      if(wasRunning && !this.stopped){
         try{await this.start(id);}
         catch(error){this.pushLog(id,"WARN","백업 후 서버 재시작 실패: "+error.message);}
       }
