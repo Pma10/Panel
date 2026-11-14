@@ -60,3 +60,26 @@ func TestRestoreRefusesSymlinkedBackupFiles(t *testing.T){
  _,err=m.restore(context.Background(),id,backup.ID)
  if err==nil{t.Fatal("restore accepted symlinked backup files")}
 }
+
+
+func TestRestoreRejectsIncompleteSnapshotByByteCount(t *testing.T) {
+ m,err:=newManager(t.TempDir(),"java")
+ if err!=nil{t.Fatal(err)}
+ defer m.shutdown(context.Background())
+ created,err:=m.create(serverConfig{Name:"truncated",Port:27453,MemoryMb:1024,EulaAccepted:true})
+ if err!=nil{t.Fatal(err)}
+ id:=created["id"].(string)
+ live:=filepath.Join(m.dir(id),"level.dat")
+ if err:=os.WriteFile(live,[]byte("original-current-world"),0600);err!=nil{t.Fatal(err)}
+ backup,err:=m.backup(context.Background(),id)
+ if err!=nil{t.Fatal(err)}
+ snapshot:=filepath.Join(m.root,"backups",id,backup.ID,"files","level.dat")
+ if err:=os.WriteFile(snapshot,[]byte("short"),0600);err!=nil{t.Fatal(err)}
+ _,err=m.restore(context.Background(),id,backup.ID)
+ var api apiError
+ if !errors.As(err,&api)||api.Status!=409{t.Fatalf("expected 409 on truncated backup, got %v",err)}
+ current,err:=os.ReadFile(live)
+ if err!=nil||string(current)!="original-current-world"{
+  t.Fatalf("live world was modified after rejected restore: %q %v",current,err)
+ }
+}
