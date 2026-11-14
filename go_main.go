@@ -49,11 +49,12 @@ func run() error {
  }
  root, err := filepath.Abs(envDefault("PANEL_DATA_DIR", ".panel-data"))
  if err != nil { return err }
- manager, err := newManager(root, envDefault("PANEL_JAVA_BIN", "java"))
- if err != nil { return err }
+ if err:=os.MkdirAll(root,0700);err!=nil{return err}
  release,err:=lockPanelData(root)
  if err!=nil{return err}
  defer release()
+ manager, err := newManager(root, envDefault("PANEL_JAVA_BIN", "java"))
+ if err != nil { return err }
  api := newPanelAPI(manager, origin, os.Getenv("PANEL_ADMIN_PASSWORD"))
  addr := net.JoinHostPort(host, port)
  srv := &http.Server{
