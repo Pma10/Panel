@@ -34,7 +34,7 @@ func main() {
  if len(os.Args)>1 {
   switch os.Args[1] {
   case "--version","-version":
-   fmt.Printf("pconn %s (%s/%s)\n",version,runtime.GOOS,runtime.GOARCH)
+   fmt.Printf("Panel %s (%s/%s)\n",version,runtime.GOOS,runtime.GOARCH)
    return
   default:
    log.Fatalf("unknown option %q; supported: --version",os.Args[1])
