@@ -6,6 +6,7 @@ import { createStaticServer } from "../scripts/serve.mjs";
 import { createAuthenticator, HttpError, assert } from "./security.mjs";
 import { MinecraftManager } from "./manager.mjs";
 import { AuditLog } from "./audit.mjs";
+import { TEMPLATES, availableVersions } from "./templates.mjs";
 
 const API="/api/v1";
 const MIME={".jar":"application/java-archive",".json":"application/json",".yml":"text/plain",".yaml":"text/plain",".txt":"text/plain",".log":"text/plain"};
@@ -84,6 +85,15 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
       requireMethod(method,"GET");
       return json(res,200,{entries:audit.list()});
     }
+    if(path===API+"/templates"){
+      requireMethod(method,"GET");
+      return json(res,200,{templates:TEMPLATES});
+    }
+    const versionsPath=path.match(/^\/api\/v1\/templates\/(paper|folia)\/versions$/);
+    if(versionsPath){
+      requireMethod(method,"GET");
+      return json(res,200,{project:versionsPath[1],versions:await availableVersions(versionsPath[1])});
+    }
     if(path===API+"/servers"){
       if(method==="GET")return json(res,200,{servers:await manager.list()});
       requireMethod(method,"POST");
@@ -115,6 +125,10 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
       }
       requireMethod(method,"PATCH");
       return json(res,200,await manager.update(id,await body(req)));
+    }
+    if(rest==="install"){
+      requireMethod(method,"POST");
+      return json(res,201,await manager.install(id,await body(req)));
     }
     if(rest==="logs"){
       requireMethod(method,"GET");
