@@ -1,6 +1,11 @@
 # Panel · Go 백엔드 운영 가이드
 
+[← README](../README.md) · [첫 서버 시작 가이드](getting-started.md) · [보안 정책](../SECURITY.md) · [아키텍처](architecture.md)
+
 **추천 런타임은 Go 단일 실행 파일 + 내장 웹 UI**입니다. Node.js는 Go 운영 환경에서 필요하지 않습니다. 기존 Node 서버는 비교·전환 목적으로 유지합니다.
+
+
+> **이름 구분:** 제품명은 **Panel**입니다. 기존 설치 스크립트와 systemd 서비스 이름은 호환성을 위해 `pconn`을 유지하므로, 서비스 관리 명령은 `systemctl status pconn`입니다.
 
 ## 설치
 
