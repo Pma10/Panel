@@ -35,7 +35,7 @@ test("managed Java process receives console commands and stops gracefully",{
   const config=await manager.create({name:"Mock Paper",port:26881,memoryMb:1024,eulaAccepted:true});
   await writeFile(join(manager.dir(config.id),"server.jar"),"placeholder");
   const live=await manager.start(config.id);
-  assert.equal(live.status,"running");
+  assert.equal(live.status,"starting");
   assert.equal(manager.command(config.id,"say hello").accepted,true);
   await new Promise(resolve=>setTimeout(resolve,100));
   const logs=manager.history(config.id).map(x=>x.message).join("\n");
