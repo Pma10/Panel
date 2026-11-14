@@ -1,162 +1,195 @@
-# 피컨 · PConn Panel
+<div align="center">
 
-**가벼운 Minecraft Java 서버 관리 패널** — Go 백엔드 + Paperlogy 기반 한국어 웹 UI. PufferPanel의 템플릿 설치와 Pterodactyl의 콘솔·파일·서버 관리 흐름을 참고했습니다.
+# Panel
 
-> **개발 중 / 운영 안정성 미검증**: 기본 Java 실행 방식은 Docker로 격리되지 않습니다. 관리자 패널을 인터넷에 바로 공개하거나 신뢰하지 않는 JAR을 실행하지 마세요. 서버 월드의 단일 백업 저장소로 사용해서도 안 됩니다.
+**A lightweight control panel for Minecraft Java servers.**
 
-## 운영용 설치·업데이트 (Linux)
+마인크래프트 서버 운영에 필요한 기능을 한 화면에.  
+단일 Go 실행 파일 · 별도 데이터베이스 불필요 · 한국어 인터페이스
 
-운영 패널은 Go 단일 실행 파일을 기본으로 합니다. Docker를 사용하지 않는 구성이 가장 단순하며, 운영 서버를 맡긴다면 `pconn` 전용 비특권 사용자와 systemd를 권장합니다.
+[시작하기](#빠른-시작) · [기능](#주요-기능) · [운영 및 업데이트](#운영-및-업데이트) · [구조](#구조와-설계-원칙)
 
-**첫 릴리스 이전에도 소스 체크아웃에서 다음 명령으로 설치·업데이트를 시도할 수 있어.** Go 1.23+, Java 21, systemd, sudo가 필요하며, Go 테스트에 실패하면 설치를 중단합니다.
+</div>
 
-```bash
-# 소스에서 검사 → 빌드 → systemd 설치/교체
-bash scripts/build-install-linux.sh
+<p align="center">
+  <img src="docs/assets/dashboard-preview.svg" alt="Panel 대시보드의 UI 프리뷰. 서버 목록, 접속 인원, 메모리, 최근 활동을 표시한 예시 화면." width="100%" />
+</p>
+<p align="center"><sub>대시보드 구성과 실제 데모 데이터를 바탕으로 만든 UI 프리뷰입니다. 운영 서버에서 캡처한 스크린샷은 아닙니다.</sub></p>
 
-# 파일로 직접 설치·교체하는 방식도 지원
-go build -o ./pconn .
-sudo bash scripts/pconnctl-linux.sh install-local ./pconn
-sudo bash scripts/pconnctl-linux.sh update-local ./pconn
-```
+---
 
-**중요:** 현재 GitHub에는 아직 릴리스가 게시되지 않았습니다. 따라서 아래 다운로드 설치 명령은 첫 버전 태그와 GitHub Release가 정상 발행된 **이후에만** 사용할 수 있습니다.
+## Panel 소개
 
-```bash
-# GitHub에 vX.Y.Z 릴리스가 실제로 올라온 뒤
-sudo bash scripts/pconnctl-linux.sh install vX.Y.Z
+**Panel은 Minecraft Java 서버를 직접 운영하는 사람을 위한 경량 웹 관리 도구**입니다. 브라우저에서 서버의 실행 상태를 확인하고, 콘솔 명령을 전송하고, 파일과 백업을 관리할 수 있도록 설계했습니다.
 
-# 새 릴리스가 나오면
-sudo bash scripts/pconnctl-linux.sh update vX.Y.Z
+Go 표준 라이브러리 기반 백엔드에 웹 UI를 내장하므로, 배포 시 **Node.js 서버나 별도 데이터베이스를 상시 실행할 필요가 없습니다.** 다중 노드 호스팅 플랫폼보다는 **한 대의 호스트에서 신뢰할 수 있는 서버를 편리하게 관리하는 용도**를 우선합니다.
 
-# 실행 파일 교체 후 문제가 생기면
-sudo bash scripts/pconnctl-linux.sh rollback
+> **개발 상태 — Preview**  
+> 주요 기능의 코드와 테스트를 개발 중인 [PR #1](https://github.com/Pma10/Panel/pull/1)에 반영했습니다. 현재 **Go 빌드·통합 테스트의 성공을 확인하지 못했고 CI도 실패 중**입니다. 공식 릴리스는 아직 없으며, 중요한 운영 서버에 바로 적용하는 것은 권장하지 않습니다.
 
-# 상태 확인
-bash scripts/pconnctl-linux.sh status
-```
+## 주요 기능
 
-설치·업데이트 과정에서는 릴리스 `SHA256SUMS`를 검사하고 새 바이너리의 버전을 확인합니다. 기존 바이너리를 보관하며, 변경 후 로컬 인증 API의 HTTP 401 응답을 확인합니다. 시작에 실패하면 이전 바이너리로 되돌립니다. **월드·설정·백업 폴더는 업데이터가 삭제하거나 덮어쓰지 않습니다.**
+| 기능 | 내용 |
+|---|---|
+| **서버 관리** | 서버 등록, Java 시작·정지·재시작, 선택적 비정상 종료 후 재시작 |
+| **실시간 콘솔** | stdout/stderr 로그 스트리밍(SSE), 로그 검색·필터, 명령어 전송 |
+| **서버 설치** | Paper/Folia 공식 안정 빌드 자동 설치 및 SHA-256 검증, 커스텀 JAR 업로드 |
+| **JAR 관리** | 서버를 중지한 상태에서 공식 JAR 교체 및 직전 JAR 롤백 |
+| **파일 관리** | 서버 폴더 탐색, 업로드·다운로드, UTF-8 텍스트 편집, 이름 변경·삭제 |
+| **백업 및 예약 작업** | 중지 상태의 파일 백업·복원, 지정 시각 백업 및 재시작 |
+| **상태 확인** | Minecraft 상태 핑의 접속 인원·버전, Linux의 프로세스 RSS |
+| **관리 및 진단** | 관리자 세션, 감사 로그, Go 힙·RSS·GC·실시간 로그 연결 수 진단 |
 
-현재 릴리스가 없거나 직접 개발 중이라면 아래 **Go 소스 빌드** 방법으로 시험해 주세요. 운영 서버에 적용하기 전에 `bash scripts/verify-go.sh` 및 테스트용 Minecraft 서버 실행·복원 검증이 필요합니다.
+**실제 서버 제어와 데모 데이터는 구분됩니다.** 데모 화면의 TPS·MSPT·CPU 및 활동 내역은 예시일 수 있으며, 현재 Go 백엔드는 TPS·MSPT를 자동 수집하지 않습니다.
 
-### 메모리 사용량 정책
+## 빠른 시작
 
-- 상시 운영에는 **Go 단일 바이너리 + systemd**를 기본으로 권장합니다. Node.js나 별도 DB 프로세스는 필요하지 않습니다.
-- 서버별 콘솔 로그는 최대 **400건**의 고정 크기 순환 버퍼로 보관합니다. 이전 방식처럼 로그가 들어올 때마다 전체 기록을 복사하지 않습니다.
-- 예약 백업·재시작은 **2개 작업자와 128개 대기열**로 처리해 동시에 수십 개의 작업이 실행되지 않도록 제한합니다.
-- `GOMEMLIMIT=256MiB`는 **Go 런타임의 소프트 메모리 제한**입니다. JVM 메모리와는 별개이며 OS가 강제하는 절대 상한이 아닙니다.
-- 관리자 **설정 → Go 메모리·성능 진단**에서 힙, Linux RSS, GC 횟수, 로그 연결 수를 직접 확인할 수 있습니다.
+### 필요한 환경
 
-### Minecraft 서버 JAR 업데이트
+- **Go 1.23 이상** — 소스에서 빌드할 때만 필요
+- **Java** — 실행할 Minecraft 서버 버전에 맞는 런타임(예: Java 21)
+- Linux / Windows — Linux에서는 비권한 사용자 + systemd 구성을 우선 권장
 
-공식 Paper/Folia 서버는 **시작 설정** 화면에서 버전을 선택하고 안정 빌드를 내려받아 SHA-256 검증 후 교체할 수 있습니다. 현재 서버를 중지해야 하며 이전 JAR 한 개를 롤백용으로 보관합니다. 직접 업로드하는 Leaf·PmaPaper·커스텀 JAR은 자동 업데이트하지 않습니다.
+현재 공식 릴리스가 없으므로 **소스 빌드 방식**을 안내합니다.
 
-**주의:** 이전 JAR로 되돌리는 기능은 JAR 파일만 되돌리며 월드 데이터를 되돌리지 않습니다. 다운그레이드 전에는 반드시 별도 월드 백업을 준비하세요.
+<details open>
+<summary><strong>Linux / macOS · 로컬 테스트</strong></summary>
 
-### 패널 재시작 후 서버 복원
-
-Go 패널이 정상적으로 종료되면 **그때 실행 중이던 Minecraft 서버 ID만** 내부 재시작 목록에 저장합니다. 새 패널이 정상적으로 HTTP 포트를 열면 해당 서버를 순차적으로 재시작합니다. 수동 중지한 서버는 자동으로 시작하지 않습니다. 강제 종료나 정전 후의 복원까지 보장하는 것은 아니므로, 복구 후 상태를 확인하세요.
-
-## Go 운영 모드 (권장 개발 경로)
-
-Go 1.23 이상과 서버 버전에 맞는 Java가 필요합니다. Node.js는 실행에 필요하지 않습니다.
-
-```bash
+~~~bash
 git clone --branch feat/unslop-panel-foundation https://github.com/Pma10/Panel.git
 cd Panel
-gofmt -w *.go
-go build -trimpath -ldflags="-s -w" -o pconn .
-export PANEL_ADMIN_PASSWORD='12자 이상의 강력한 무작위 비밀번호'
-./pconn
-```
 
-브라우저에서 `http://127.0.0.1:4173`으로 접속합니다. Windows는 `go build -o pconn.exe .` 및 PowerShell 환경 변수 설정으로 실행합니다.
+go build -trimpath -ldflags="-s -w" -o panel .
 
-### 주요 기능
+# 안전하게 관리자 비밀번호 입력 (12자 이상)
+read -rsp 'Admin password: ' PANEL_ADMIN_PASSWORD && echo
+export PANEL_ADMIN_PASSWORD
 
-| 영역 | 지원 내용 |
-|---|---|
-| 서버 생성 | 포트, 메모리, EULA 설정, 수동 JAR 및 Paper/Folia 안정 빌드 템플릿 |
-| 서버 제어 | Java 시작·중지·재시작, 비정상 종료 시 선택적 제한적 재시작 |
-| 콘솔 | 실제 Java stdout/stderr, SSE 실시간 로그, 명령어 입력 |
-| 파일 | 탐색, 업로드·다운로드, 텍스트 편집, 이동 없이 이름 변경·삭제 |
-| 백업 | 중지 상태 월드 백업·복원, 예약 백업 및 재시작 |
-| 상태 조회 | Java 프로세스 상태와 Linux RSS, Minecraft 상태 핑의 접속 인원·버전 |
-| 보안 | 관리자 세션·HttpOnly 쿠키, CSRF/Origin 검사, 로그인 시도 제한, 경로 격리 |
-| 감사 | 서버 관리 작업 내역 저장 |
+./panel
+~~~
 
-Paper/Folia는 공식 PaperMC Fill v3 API의 안정 빌드를 받고 SHA-256을 검사합니다. Leaf·PmaPaper 등 기타 서버는 `server.jar`을 수동으로 업로드하면 됩니다. 서버 시작 전 [Minecraft EULA](https://aka.ms/MinecraftEULA)를 확인해야 합니다.
+브라우저에서 **http://127.0.0.1:4173**에 접속합니다. 서버를 등록한 뒤 공식 Paper/Folia 버전을 선택하거나 신뢰하는 \`server.jar\`을 업로드하여 실행할 수 있습니다.
+
+</details>
+
+<details>
+<summary><strong>Windows · 로컬 테스트</strong></summary>
+
+~~~powershell
+git clone --branch feat/unslop-panel-foundation https://github.com/Pma10/Panel.git
+cd Panel
+
+go build -o panel.exe .
+$env:PANEL_ADMIN_PASSWORD = Read-Host "Administrator password"
+.\panel.exe
+~~~
+
+기본 접속 주소는 **http://127.0.0.1:4173**입니다.
+
+</details>
+
+> **Minecraft EULA:** 서버 시작 전 [Minecraft End User License Agreement](https://aka.ms/MinecraftEULA)를 읽고 동의해야 합니다. Panel은 기본 서버 설정에서 RCON을 비활성화합니다.
+
+## 운영 및 업데이트
+
+### Linux · systemd 기반 설치
+
+Panel은 웹 UI와 백엔드가 **하나의 Go 바이너리**로 실행됩니다. 개발 의존성을 운영 서버에 남기지 않아도 되도록 배포 스크립트를 포함했습니다.
+
+~~~bash
+# 소스 검사 → 테스트 → 바이너리 빌드 → systemd 설치/갱신
+bash scripts/build-install-linux.sh
+
+# 서비스 상태 확인
+sudo systemctl status pconn
+
+# 문제 조사
+sudo journalctl -u pconn -n 100 --no-pager
+~~~
+
+이 스크립트는 검사 또는 테스트가 실패하면 설치를 중단하도록 작성되었습니다. 현재 배포 스크립트와 실제 서비스 구동의 **완전한 검증은 끝나지 않았습니다.** 먼저 테스트 서버에서 실행하세요.
+
+**릴리스 발행 이후**에는 GitHub Releases의 다운로드 파일과 \`SHA256SUMS\`를 확인한 뒤 실행 파일을 교체하고, 이상이 있으면 이전 바이너리로 되돌리도록 다음 명령을 제공합니다.
+
+~~~bash
+sudo bash scripts/pconnctl-linux.sh update vX.Y.Z
+sudo bash scripts/pconnctl-linux.sh rollback
+~~~
+
+\`vX.Y.Z\`는 실제 게시된 릴리스 태그로 바꿔야 합니다. **아직 정식 릴리스가 없어 현재는 다운로드 방식으로 설치할 수 없습니다.**
+
+Panel을 정상 종료하여 업데이트하면 실행 중이던 Java 서버는 잠시 정지합니다. 재시작 후 이전에 실행 중이던 서버만 다시 시작하도록 설계했지만, **JVM의 완전한 기동까지 자동으로 보장하지는 않습니다.** 업데이트 이후 콘솔과 접속 상태를 확인해야 합니다.
 
 ### 설정
 
-| 환경 변수 | 기본값 |
-|---|---|
-| `PANEL_ADMIN_PASSWORD` | 필수, 12자 이상 |
-| `PANEL_PORT` | `4173` |
-| `PANEL_BIND_HOST` | `127.0.0.1` |
-| `PANEL_PUBLIC_ORIGIN` | `http://127.0.0.1:4173` |
-| `PANEL_DATA_DIR` | `./.panel-data` |
-| `PANEL_JAVA_BIN` | `java` |
+| 환경 변수 | 기본값 | 설명 |
+|---|---|---|
+| \`PANEL_ADMIN_PASSWORD\` | **필수** | 관리자 비밀번호, 최소 12자 |
+| \`PANEL_BIND_HOST\` | \`127.0.0.1\` | 패널 리스닝 주소 |
+| \`PANEL_PORT\` | \`4173\` | 웹 관리 포트 |
+| \`PANEL_PUBLIC_ORIGIN\` | \`http://127.0.0.1:4173\` | 브라우저가 접속하는 정확한 Origin |
+| \`PANEL_DATA_DIR\` | \`./.panel-data\` | 서버·백업·설정·감사 로그 저장 위치 |
+| \`PANEL_JAVA_BIN\` | \`java\` | Java 실행 파일 |
+| \`GOMEMLIMIT\` | 미설정 | Go 런타임의 **소프트** 메모리 목표값(예: \`256MiB\`) |
 
-서버 폴더, 설정, 백업과 감사 로그는 `PANEL_DATA_DIR` 아래에 저장됩니다. Linux 서버용 서비스 예제는 `deploy/pconn.service`에 있습니다.
+\`GOMEMLIMIT\`는 OS가 강제하는 메모리 제한이 아니며 **Minecraft Java 프로세스에 적용되지 않습니다**. Java의 \`-Xmx\` 또한 힙 한도일 뿐 서버 전체 메모리의 절대 상한이 아닙니다.
 
-**설계·보안·설치 가이드:** [docs/go-backend.md](docs/go-backend.md)
+자세한 systemd·Docker 구성은 [Go 운영 가이드](docs/go-backend.md)를 참고하세요. Docker 예제는 **패널 전체를 한 컨테이너에 넣는 구성**이며 서버별 격리는 제공하지 않습니다.
 
-## 테스트
+## 구조와 설계 원칙
 
-```bash
-gofmt -w *.go
+~~~text
+Browser
+  └─ Panel Web UI (HTML / CSS / JavaScript)
+        │  /api/v1 · SSE
+        ▼
+     Panel (Go)
+        ├─ Authentication & audit
+        ├─ Java process lifecycle
+        ├─ Console & file streaming
+        ├─ Backups & scheduler
+        └─ Minecraft status ping
+              └─ Minecraft Java server(s)
+
+Data: PANEL_DATA_DIR / servers · backups · config.json · audit.jsonl
+~~~
+
+Panel은 **가벼움뿐 아니라 단순한 유지보수와 데이터 안전성**을 우선합니다.
+
+- **의존성 최소화:** Go 표준 라이브러리 중심, 별도 DB·상시 Node 런타임 없음
+- **메모리 사용 제어:** 서버당 콘솔 로그 400개 순환 버퍼, 제한된 SSE 구독, 예약 작업 2개 워커
+- **업데이트와 데이터 분리:** 실행 파일을 교체해도 월드·설정·백업은 별도 디렉터리에 보관
+- **보수적인 변경:** 서버 중지 상태에서 JAR 교체·백업·복원, 공식 JAR 체크섬 검증
+- **명확한 관측:** Go 힙과 Linux RSS를 구분해 확인하며, 측정하지 않은 성능 수치를 제시하지 않음
+
+세부 모듈과 유지보수 절차는 [아키텍처 문서](docs/architecture.md)에 정리했습니다.
+
+## 보안 및 현재 제한 사항
+
+Panel은 **단일 호스트·단일 관리자·신뢰 가능한 서버 JAR**을 기본 전제로 합니다.
+
+- **HTTPS가 없는 공개 관리자 접속은 권장하지 않습니다.** 기본적으로 \`127.0.0.1\`에서만 실행하고, 외부 관리가 필요하면 인증과 HTTPS 리버스 프록시를 구성하세요.
+- 각 Minecraft JVM은 **Panel과 동일한 OS 사용자 권한**으로 실행됩니다. Pterodactyl Wings처럼 서버별 Docker/cgroup 파일 시스템·CPU·RAM 격리가 **없습니다**. 신뢰할 수 없는 JAR·플러그인을 실행하지 마세요.
+- 백업은 서버가 중지된 상태에서 수행합니다. 예약 백업은 **다운타임**이 있으며, 패널 외부에도 별도 월드 백업을 유지해야 합니다.
+- **아직 제공하지 않는 기능:** 다중 사용자 RBAC, 2FA, SFTP, 멀티노드, 원격 백업, 무중단 백업, TPS/MSPT 수집, OS 수준 서버별 리소스 격리.
+- \`LICENSE\` 파일은 아직 포함되지 않았습니다. 외부 재배포·기여 정책은 별도 확정이 필요합니다.
+
+## 개발 및 검증
+
+~~~bash
 go vet ./...
+go test -count=1 ./...
 go test -race -count=1 ./...
-go build -o pconn .
-```
+go build -trimpath -o panel .
 
-전용 GitHub Actions 검사도 추가했습니다. 하지만 **현재 저장소의 Actions 작업이 러너에 진입하지 못하고 있어 CI 통과를 확인하지 못했습니다.** Windows·Linux 실환경에서 별도로 빌드와 실제 Minecraft 서버 실행을 확인해야 합니다.
-
-## 기존 Node.js 코드
-
-이전 구현은 비교·마이그레이션용으로 유지하고 있습니다. `npm run dev`는 **데모 UI**, `npm run panel`은 **기존 Node 프로토타입 백엔드**입니다. Go와 Node 서버를 동일한 포트에서 동시에 실행하지 마세요. 새 기능은 Go 경로를 우선 개발합니다.
-
-## 알려진 한계
-
-현재 구조는 **Go가 동일 OS 계정으로 여러 Java 프로세스를 직접 실행**합니다. 서버별 컨테이너 격리, 노드 간 분산 운영, SFTP, 다중 사용자 RBAC, 2FA, CPU·디스크·실제 메모리 제한, TPS/MSPT 플러그인 연동, 무중단 백업, 외부 프로세스 자동 복구는 아직 지원하지 않습니다.
-
-Java `-Xmx`는 힙 크기만 제한합니다. Pterodactyl Wings처럼 Docker 및 cgroup으로 서버 자원과 파일 시스템을 실제로 격리하는 기능과 혼동하지 마세요.
-
-디자인 참고: [Figma 대시보드](https://www.figma.com/design/wJgjNvtFDPTscqKWzV6J5h?node-id=63-529), [Figma 콘솔](https://www.figma.com/design/wJgjNvtFDPTscqKWzV6J5h?node-id=63-949). [Unslop](https://github.com/heydamir/unslop) by Damir Sokolovsky(CC BY 4.0), Paperlogy 웹폰트를 사용합니다.
-
-## 실제 운영 전 검증
-
-Linux에서 Go 1.23+, Java, gcc(CGO/race), curl, Python 3를 설치한 다음:
-
-```bash
+# Linux: 로컬 HTTP·인증 경계까지 확인하는 검증 스크립트
 bash scripts/verify-go.sh
-```
+~~~
 
-이 검사는 Go 코드를 정리하고 `go vet`, `go test -race`, 최적화 빌드, 실제 로컬 HTTP 구동, 관리자 미인증 API의 HTTP 401, 내부 파일 접근의 HTTP 404를 차례로 확인합니다. 실행 중인 Minecraft 서버 파일에는 접근하지 않고 임시 데이터 디렉터리에서 실행합니다.
+레이스 검사는 환경에 따라 CGO와 C 컴파일러가 필요합니다. 실제 서버 적용 전에는 별도 테스트 월드에서 **시작 → 콘솔 → 종료 → 백업 → 복원 → 업데이트**를 확인하세요.
 
-**이 저장소의 GitHub Actions는 현재 실행 단계가 나타나지 않고 실패하고 있어, CI가 정상 실행됐다고 주장할 수 없습니다.** 실제 배포 전에 위 검사를 직접 통과시키고 별도 테스트 세계에서 Java 시작·종료·복원까지 검증해야 합니다.
+기존 Node 프로토타입도 마이그레이션·비교를 위해 남겨 두었습니다. \`npm run dev\`는 **예시 데이터가 표시되는 UI 개발 모드**이며 Go 백엔드와 별개입니다.
 
-## Linux / Docker 배포
+---
 
-서버 직접 설치는 [Go 운영 가이드](docs/go-backend.md)와 `deploy/pconn.service`를 참고하세요.
-
-Docker에서는 `.env.example`을 `.env`로 복사한 뒤 강력한 관리자 비밀번호와 **실제로 적용된 HTTPS 관리 패널 주소**를 지정합니다.
-
-```bash
-docker compose build
-docker compose up -d
-docker compose logs -f pconn
-```
-
-기본 Compose 구성은 관리자 포트 4173을 **호스트 127.0.0.1에만 바인딩**하고, Minecraft 접속 포트 25565만 외부로 엽니다. HTTPS 리버스 프록시와 도메인 설정이 별도로 필요합니다. 서버를 추가하여 다른 게임 포트를 사용한다면 Compose 포트 매핑도 직접 추가해야 합니다.
-
-**Docker의 10GiB 제한은 패널과 모든 JVM의 합계입니다.** 서버별 격리가 아니며, 각 서버의 Java 힙 설정을 합산했을 때 컨테이너 상한을 넘지 않도록 주의하세요.
-
-### 장애 복구와 데이터 보존
-
-- Linux의 패널 데이터 폴더는 단일 실행 잠금을 사용합니다. 서버가 이미 존재하는 경우 두 번째 패널 실행을 거부합니다.
-- 이전 Java PID가 살아 있는 것으로 감지되면 UI에서 경고하며 중복 시작을 차단합니다. **기존 프로세스가 정상 종료됐는지 확인한 뒤** 다시 시작하세요.
-- Windows 등 비-Linux의 데이터 잠금 마커가 비정상 종료 후 남았다면, 기존 패널이 종료됐는지 반드시 확인한 뒤 잠금 파일을 수동으로 정리해야 합니다.
-- 관리자 패널 데이터 폴더 밖에도 중요한 월드 백업을 보관하세요. 실행 중인 월드의 무중단 백업은 아직 지원하지 않습니다.
+<sub>Panel은 Mojang Studios 또는 Microsoft의 공식 제품이 아닙니다. UI는 Paperlogy를 사용하며 [Unslop](https://github.com/heydamir/unslop)의 디자인 지침을 참고했습니다. PufferPanel·Pterodactyl과는 별개의 프로젝트입니다.</sub>
