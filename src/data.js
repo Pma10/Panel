@@ -53,7 +53,7 @@ export const DEMO_AUDIT = [
   { time: "22:26", action: "백업 생성", actor: "Pma", target: "PvPConnect Main" },
   { time: "21:52", action: "서버 시작", actor: "hypadev11", target: "Practice Staging" },
   { time: "20:14", action: "설정 변경", actor: "Pma", target: "PvPConnect Main" },
-  { time: "19:40", action: "접속 성공", actor: "Pma", target: "피컨" }
+  { time: "19:40", action: "접속 성공", actor: "Pma", target: "Panel" }
 ];
 export const ROUTE_INFO = [
   { route: "dashboard", label: "대시보드", icon: "grid", section: "workspace" },
