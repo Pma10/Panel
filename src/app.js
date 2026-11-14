@@ -543,9 +543,12 @@ function renderSettings() {
       button("로그아웃","logout")+'</div></div>')+
     (state.diagnostics?card("Go 패널 메모리·성능 진단",
       '<div class="info-list">'+
+      '<div class="info-line"><strong>실제 Go 프로세스 RSS (Linux)</strong><span class="right">'+
+        (state.diagnostics.processRSSGb==null?"측정 불가":(Number(state.diagnostics.processRSSGb)*1024).toFixed(1)+" MB")+'</span></div>'+
       '<div class="info-line"><strong>Go 힙 사용량</strong><span class="right">'+fileSize(state.diagnostics.goHeapBytes)+'</span></div>'+
       '<div class="info-line"><strong>Go 런타임 전체 예약</strong><span class="right">'+fileSize(state.diagnostics.goTotalSysBytes)+'</span></div>'+
-      '<div class="info-line"><strong>메모리 소프트 제한</strong><span class="right">'+fileSize(state.diagnostics.memoryLimitBytes)+'</span></div>'+
+      '<div class="info-line"><strong>메모리 소프트 제한</strong><span class="right">'+
+        (Number(state.diagnostics.memoryLimitBytes)>1e15?"미설정":fileSize(state.diagnostics.memoryLimitBytes))+'</span></div>'+
       '<div class="info-line"><strong>관리 중인 Java 프로세스</strong><span class="right">'+h(state.diagnostics.managedProcesses)+'</span></div>'+
       '<div class="info-line"><strong>메모리 로그 수</strong><span class="right">'+h(state.diagnostics.logEntries)+'</span></div>'+
       '<div class="info-line"><strong>실시간 로그 연결</strong><span class="right">'+h(state.diagnostics.logSubscribers)+'</span></div>'+
