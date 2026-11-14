@@ -51,6 +51,9 @@ func run() error {
  if err != nil { return err }
  manager, err := newManager(root, envDefault("PANEL_JAVA_BIN", "java"))
  if err != nil { return err }
+ release,err:=lockPanelData(root)
+ if err!=nil{return err}
+ defer release()
  api := newPanelAPI(manager, origin, os.Getenv("PANEL_ADMIN_PASSWORD"))
  addr := net.JoinHostPort(host, port)
  srv := &http.Server{
