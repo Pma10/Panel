@@ -47,11 +47,12 @@ func copySnapshot(ctx context.Context,source,target string)(int64,int,error){
   if entry.IsDir(){return os.MkdirAll(dest,0700)}
   count++;total+=info.Size()
   if count>maxBackupFiles||total>maxBackupBytes{return apiError{413,"백업 파일 개수 또는 8GiB 크기 제한을 넘었습니다."}}
-  in,err:=os.Open(path);if err!=nil{return err};defer in.Close()
-  out,err:=os.OpenFile(dest,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if err!=nil{return err}
+  in,err:=os.Open(path);if err!=nil{return err}
+  out,err:=os.OpenFile(dest,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600)
+  if err!=nil{in.Close();return err}
   n,cpErr:=io.Copy(out,io.LimitReader(in,info.Size()+1))
-  clErr:=out.Close()
-  if cpErr!=nil{return cpErr};if clErr!=nil{return clErr}
+  inErr:=in.Close();clErr:=out.Close()
+  if cpErr!=nil{return cpErr};if inErr!=nil{return inErr};if clErr!=nil{return clErr}
   if n!=info.Size(){return apiError{409,"백업 중 파일 크기가 변경되었습니다."}}
   return nil
  })
