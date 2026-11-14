@@ -235,7 +235,7 @@ func (m *manager) start(id string)(map[string]any,error){
  if err!=nil||!info.Mode().IsRegular(){m.mu.Unlock();return nil,apiError{409,"서버 JAR 파일을 업로드하세요."}}
  cmd:=exec.Command(m.javaBin,fmt.Sprintf("-Xms%dM",min(s.cfg.MemoryMb,512)),
   fmt.Sprintf("-Xmx%dM",s.cfg.MemoryMb),"-jar",s.cfg.Jar,"nogui")
- cmd.Dir=folder;cmd.Env=javaEnv()
+ cmd.Dir=folder;cmd.Env=javaEnv();configureJavaChild(cmd)
  stdout,err:=cmd.StdoutPipe();if err!=nil{m.mu.Unlock();return nil,err}
  stderr,err:=cmd.StderrPipe();if err!=nil{m.mu.Unlock();return nil,err}
  stdin,err:=cmd.StdinPipe();if err!=nil{m.mu.Unlock();return nil,err}
