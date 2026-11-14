@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createWriteStream, createReadStream } from "node:fs";
-import { mkdir, readFile, writeFile, rename, rm, readdir, stat, lstat, copyFile, open, statfs } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, rm, readdir, stat, lstat, copyFile, open, statfs, rmdir } from "node:fs/promises";
 import { resolve, join, basename, dirname, relative, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
@@ -265,13 +265,16 @@ export class MinecraftManager {
     assert(sub && sub!==".",400,"삭제할 파일을 선택하세요.");
     const path=await confinedPath(this.dir(id),sub);
     const info=await lstat(path);
-    await rm(path,{recursive:false});return {deleted:true,type:info.isDirectory()?"folder":"file"};
+    if(info.isDirectory())await rmdir(path);else await rm(path,{force:false});
+    return {deleted:true,type:info.isDirectory()?"folder":"file"};
   }
   async renameFile(id,from,to){
     assert(!this.active.has(id),409,"파일 수정 전 서버를 중지하세요.");
     const a=await confinedPath(this.dir(id),from),b=await confinedPath(this.dir(id),to,{missing:true});
     assert(from && to,400,"경로가 필요합니다.");
     assert(dirname(a)===dirname(b),400,"같은 폴더 내 이름 변경만 지원합니다.");
+    try{await lstat(b);throw new HttpError(409,"같은 이름의 파일이 이미 있습니다.");}
+    catch(e){if(e.code!=="ENOENT")throw e;}
     await rename(a,b);return {renamed:true};
   }
   async scanTree(base){
@@ -344,13 +347,21 @@ export class MinecraftManager {
       await rename(active,previous);
       moved=true;
       try{await rename(staged,active);}
-      catch(e){await rename(previous,active);moved=false;throw e;}
+      catch(e){
+        try{await rename(previous,active);moved=false;}
+        catch(rollbackError){
+          // Preserve the previous world if rollback also fails.
+          moved=false;
+          throw new HttpError(500,"복원 실패 및 롤백 실패: 기존 데이터는 "+previous+"에 보존되었습니다.");
+        }
+        throw e;
+      }
       await rm(previous,{recursive:true,force:true});
       this.pushLog(id,"WARN","백업 복원 완료: "+bid);
       return {restored:true,backupId:bid};
     }finally{
       await rm(staged,{recursive:true,force:true});
-      if(moved){try{await rm(previous,{recursive:true,force:true});}catch{}}
+      // Keep any leftover previous directory on failure for manual recovery.
       this.busy.delete(id);
     }
   }
