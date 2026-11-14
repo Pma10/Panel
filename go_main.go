@@ -82,18 +82,26 @@ func run() error {
  if err != nil { return err }
  go manager.resumePending()
  log.Printf("Panel: %s (managed data: %s)", origin, root)
- done := make(chan os.Signal, 1)
- signal.Notify(done, os.Interrupt, syscall.SIGTERM)
+ // Serve may return as soon as Shutdown closes the listener. Do not let
+ // main exit while the managed JVMs are still shutting down.
+ stopCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+ defer stopSignals()
+ shutdownComplete := make(chan struct{})
  go func() {
-  <-done
+  defer close(shutdownComplete)
+  <-stopCtx.Done()
   ctx, cancel := context.WithTimeout(context.Background(), 43*time.Second)
   defer cancel()
   api.closeStreams()
   if e := manager.shutdown(ctx); e != nil { log.Printf("Java 종료: %v", e) }
   if e := srv.Shutdown(ctx); e != nil { log.Printf("HTTP 종료: %v", e) }
  }()
- if err = srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-  return fmt.Errorf("server: %w", err)
+ serveErr := srv.Serve(listener)
+ // Also shut down the JVMs if HTTP Serve fails independently of SIGTERM.
+ stopSignals()
+ <-shutdownComplete
+ if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+  return fmt.Errorf("server: %w", serveErr)
  }
  return nil
 }
