@@ -348,3 +348,338 @@ function renderPage() {
     default: return renderDashboard();
   }
 }
+
+function modalBody() {
+  if (!state.modal) return "";
+  const m = state.modal;
+  const actions = (primaryLabel, action, variant = "primary") => `<div class="modal-actions">
+    <button class="btn" data-action="modal-close">취소</button>
+    <button class="btn ${variant}" data-action="${action}">${primaryLabel}</button></div>`;
+  if (m.kind === "switcher") return `<div class="modal-scrim" data-action="modal-background">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <h2 id="modal-title">서버 선택</h2><p>관리할 서버를 선택하세요.</p>
+      <div class="stack">${state.servers.map((s) => `<button class="btn" style="justify-content:space-between;width:100%;min-height:48px" data-action="choose-server" data-id="${h(s.id)}">
+      <span>${h(s.name)}</span>${badge(s.status)}</button>`).join("")}</div>
+      <div class="modal-actions" style="margin-top:22px"><button class="btn" data-action="modal-close">닫기</button></div>
+    </div></div>`;
+  if (m.kind === "palette") return `<div class="modal-scrim" data-action="modal-background"><div class="modal command-palette" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h2 id="modal-title">기능 검색</h2>
+    <input id="palette-search" class="field" placeholder="메뉴 검색" autocomplete="off" aria-label="기능 검색" value="${h(state.paletteQuery)}">
+    <div id="palette-results" class="palette-results">${paletteItems()}</div>
+    <div class="modal-actions"><button class="btn" data-action="modal-close">닫기</button></div>
+  </div></div>`;
+  if (m.kind === "create") return `<div class="modal-scrim" data-action="modal-background">
+    <form class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" id="create-server-form">
+      <h2 id="modal-title">새 서버 추가</h2>
+      <p>마인크래프트 서버의 기본 정보를 입력합니다. ${state.mode==="demo"?"추가되는 서버는 예시 목록에만 반영됩니다.":"서버 생성은 API에 요청됩니다."}</p>
+      <div class="stack"><div class="form-group"><label for="new-server-name">서버 이름</label>
+        <input id="new-server-name" name="server-name" class="field" maxlength="80" required placeholder="예: PvP Practice"></div>
+      <div class="form-group"><label for="new-server-kind">서버 유형</label><select class="select" id="new-server-kind" name="server-kind"><option>마인크래프트 · 새 서버</option><option>프록시</option></select></div></div>
+      <div class="modal-actions" style="margin-top:25px"><button class="btn" type="button" data-action="modal-close">취소</button>
+        <button class="btn primary" type="submit">서버 추가</button></div>
+    </form></div>`;
+  return `<div class="modal-scrim" data-action="modal-background"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <h2 id="modal-title">${h(m.title || "확인")}</h2><p>${h(m.description || "")}</p>
+    ${state.mode==="demo" ? `<div class="demo-block" style="margin-bottom:20px">예시 모드입니다. 실제 서버나 파일은 변경되지 않습니다.</div>` : ""}
+    ${actions(m.confirmLabel || "확인",m.confirmAction || "modal-close",m.danger?"danger":"primary")}
+  </div></div>`;
+}
+function paletteItems() {
+  const needle = state.paletteQuery.toLocaleLowerCase("ko").trim();
+  const items = ROUTE_INFO.filter((r) => !needle || r.label.toLocaleLowerCase("ko").includes(needle));
+  if (!items.length) return `<div class="empty-state">검색 결과가 없습니다.</div>`;
+  return items.map((item) => `<button class="palette-item" data-action="palette-navigate" data-route="${h(item.route)}">
+    ${icon(item.icon)}<span>${h(item.label)}</span>${icon("arrow","small")}</button>`).join("");
+}
+function render() {
+  document.title = routeTitle() + " · 피컨";
+  const app = $("#app");
+  if (!app) return;
+  let content = "";
+  if (state.loading) {
+    content = `<div class="card empty-state">${icon("refresh","large")}<strong>서버 정보를 불러오는 중입니다</strong><p>연결된 API에 요청하고 있습니다.</p></div>`;
+  } else if (state.apiError && state.mode === "live" && !state.servers.length) {
+    content = `<div class="card empty-state">${icon("alert","large")}<strong>서버 연결에 실패했습니다</strong><p>${h(state.apiError)}</p>
+      <button class="btn" style="margin-top:18px" data-action="api-retry">다시 시도</button></div>`;
+  } else content = renderPage();
+  app.innerHTML = `<div class="app-shell">${renderSidebar()}<div class="main-shell">${renderChrome()}
+    <main class="page ${state.route==="console"?"console-page":""}" id="main-content">${content}
+      ${state.route!=="console"?`<div class="footer">피컨 · ${state.mode==="demo"?"프런트엔드 시연":"서버 관리"} · <a href="https://github.com/Pma10/Panel" target="_blank" rel="noopener noreferrer">GitHub</a></div>`:""}
+    </main></div></div><div id="modal-root">${modalBody()}</div><div id="toast-root" aria-live="polite"></div>`;
+  if (state.route === "console") scrollLogs();
+  if (state.route === "servers") filterServerRows();
+}
+function setModal(modal) {
+  state.modal = modal;
+  const host = $("#modal-root");
+  if (host) host.innerHTML = modalBody();
+  if (modal?.kind === "palette") {
+    const input = $("#palette-search");
+    input?.focus();
+  } else if (modal?.kind === "create") $("#new-server-name")?.focus();
+  else if (modal) $("#modal-root .btn")?.focus();
+}
+function toast(message) {
+  const host = $("#toast-root");
+  if (!host) return;
+  host.innerHTML = `<div class="toast" role="status">${h(message)}</div>`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { if (host.isConnected) host.innerHTML = ""; }, 3500);
+}
+function scrollLogs() {
+  if (!state.autoScroll) return;
+  requestAnimationFrame(() => {
+    const pane = $("#log-viewport");
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  });
+}
+function updateLogRows() {
+  const parent = $("#log-rows");
+  if (!parent) return;
+  parent.innerHTML = renderLogRows();
+  const count = $(".console-statusbar .console-muted:last-child");
+  if (count && count.textContent.endsWith("줄")) count.textContent = filterLogs(state.logs,state.query,state.level).length + "줄";
+  scrollLogs();
+}
+function filterServerRows() {
+  document.querySelectorAll("[data-server-row]").forEach((tr) => {
+    const text = tr.dataset.filterText || "";
+    const term = state.serverQuery.trim().toLocaleLowerCase("ko");
+    tr.hidden = !(!term || text.includes(term)) || (state.serverStatus !== "all" && tr.dataset.status !== state.serverStatus);
+  });
+}
+function navigate(route) {
+  if (!routeMap[route]) return;
+  state.mobileMenu = false;
+  state.modal = null;
+  if (location.hash !== "#/" + route) location.hash = "#/" + route;
+  else { state.route = route; render(); }
+}
+function downloadText(filename, text) {
+  const blob = new Blob([text],{ type:"text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function mockActionMessage(action) {
+  const phrase = {
+    "file-upload": "파일 업로드", "file-new-folder":"폴더 생성", "network-add":"포트 추가",
+    "user-invite":"사용자 초대", "health-check":"상태 재검사"
+  }[action] || "해당 작업";
+  setModal({kind:"notice",title:phrase,description:state.mode === "demo" ?
+    "이 작업은 현재 미리보기 UI에서 실제로 실행되지 않습니다. 백엔드 API 연동 후 사용할 수 있습니다." :
+    "현재 작업은 연결된 백엔드에서 지원하도록 아직 구현되지 않았습니다.",
+    confirmLabel:"닫기",confirmAction:"modal-close"});
+}
+function exportLogs() {
+  const entries = filterLogs(state.logs,state.query,state.level);
+  const rows = entries.map((row) => "["+row.time+" "+row.level+"] "+row.message);
+  downloadText("pconn-"+state.selectedId+"-console.log",rows.join("\n")+"\n");
+  toast("표시된 로그를 파일로 내보냈습니다.");
+}
+async function sendCommand() {
+  const raw = $("#console-command")?.value ?? state.command;
+  const command = validateCommand(raw);
+  if (!command.valid) return toast(command.error);
+  if (state.mode === "demo") {
+    const now = new Date().toLocaleTimeString("ko-KR", { hour12:false });
+    state.logs = [...state.logs,{time:now,level:"DEMO",message:"> "+command.value+" (실제 서버에 미전송)"}].slice(-2000);
+    state.command = "";
+    const input = $("#console-command");
+    if (input) input.value = "";
+    updateLogRows();
+    toast("예시 명령만 기록했습니다. 실제 서버에는 전송되지 않았습니다.");
+    input?.focus();
+    return;
+  }
+  try {
+    await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/commands",{method:"POST",body:{command:command.value}});
+    state.command = ""; if ($("#console-command")) $("#console-command").value = "";
+    toast("명령어 전송 요청이 접수되었습니다.");
+  } catch (error) { toast(error.message); }
+}
+async function performPowerAction() {
+  const action = state.modal?.power;
+  if (!["stop","start","restart"].includes(action)) return;
+  setModal(null);
+  const s = server();if (!s) return;
+  if (state.mode === "demo") {
+    if (action === "stop") { s.status="stopped";s.players=0;s.memoryGb=0; }
+    else { s.status="running"; }
+    state.logs.push({time:new Date().toLocaleTimeString("ko-KR",{hour12:false}),level:"DEMO",
+      message:"서버 "+({stop:"중지",start:"시작",restart:"재시작"}[action])+" UI 시뮬레이션 (실제 프로세스 변경 없음)"});
+    toast("예시 상태만 변경했습니다. 실제 서버는 제어하지 않았습니다.");
+    render(); return;
+  }
+  try {
+    await apiRequest("/servers/"+encodeURIComponent(s.id)+"/actions/"+action,{method:"POST"});
+    toast("서버 작업 요청이 접수되었습니다."); await loadFromApi();
+  } catch (error) { toast(error.message); }
+}
+async function createBackup() {
+  if (state.mode === "demo") { setModal(null); return toast("예시 모드: 실제 백업을 생성하지 않았습니다."); }
+  try { await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups",{method:"POST"});toast("백업 작업이 접수되었습니다."); }
+  catch(e) { toast(e.message); }
+  setModal(null);
+}
+async function restoreBackup() {
+  const id=state.modal?.id;setModal(null);
+  if (!id) return;
+  if (state.mode === "demo") return toast("예시 모드: 실제 백업 복원은 실행되지 않았습니다.");
+  try { await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups/"+encodeURIComponent(id)+"/restore",{method:"POST"});toast("복원 작업이 접수되었습니다.");}
+  catch(e) { toast(e.message); }
+}
+async function loadFromApi() {
+  if (!apiEnabled) return;
+  if (logClose) { logClose(); logClose=null; }
+  state.loading = true; state.apiError = ""; state.servers=[];state.logs=[];render();
+  try {
+    const value = await apiRequest("/servers");
+    const items = Array.isArray(value) ? value : value?.servers;
+    if (!Array.isArray(items)) throw new Error("서버 응답 형식이 올바르지 않습니다.");
+    state.servers = items.filter((it) => it && typeof it.id==="string" && typeof it.name==="string")
+      .map((it) => ({...it,status:it.status||"unknown",players:Number(it.players)||0,maxPlayers:Number(it.maxPlayers)||0,
+        memoryGb:Number(it.memoryGb)||0,memoryLimitGb:Number(it.memoryLimitGb)||1,cpu:Number(it.cpu)||0,
+        directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—"}));
+    if (!state.servers.some((s) => s.id===state.selectedId)) state.selectedId=state.servers[0]?.id||"";
+    if (state.selectedId) {
+      const logs = await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/logs");
+      const list = Array.isArray(logs) ? logs : logs?.entries;
+      state.logs = Array.isArray(list) ? list.filter((entry) => entry && typeof entry.time==="string" && typeof entry.level==="string" && typeof entry.message==="string").slice(-2000) : [];
+    }
+  } catch (error) { state.apiError=error.message || "연결할 수 없습니다.";state.servers=[];state.logs=[]; }
+  finally { state.loading=false;render(); connectLogStream(); }
+}
+function connectLogStream() {
+  if (logClose) { logClose(); logClose=null; }
+  if (!apiEnabled || !state.selectedId || state.route!=="console" || state.apiError) return;
+  logClose = streamLogs(state.selectedId,(entry) => {
+    state.logs = [...state.logs,entry].slice(-2000);
+    updateLogRows();
+  },() => { state.apiError="실시간 로그 연결이 불안정합니다."; });
+}
+window.addEventListener("hashchange", () => {
+  state.route=routeFromHash(location.hash);state.mobileMenu=false;state.modal=null;
+  render();connectLogStream(); window.scrollTo({top:0,behavior:"instant"});
+});
+document.addEventListener("keydown",(event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==="k") {
+    event.preventDefault();state.paletteQuery="";setModal({kind:"palette"});return;
+  }
+  if (event.key==="Escape" && state.modal) {event.preventDefault();setModal(null);}
+  if (event.key==="Enter" && event.target?.id==="console-command") {
+    event.preventDefault();sendCommand();
+  }
+  if (event.key==="Enter" && event.target?.id==="palette-search") {
+    const first = ROUTE_INFO.find((r) => r.label.toLowerCase().includes(state.paletteQuery.toLowerCase()));
+    if (first) navigate(first.route);
+  }
+});
+document.addEventListener("input",(event) => {
+  if (event.target.id === "log-search") { state.query=event.target.value;updateLogRows(); }
+  if (event.target.id === "server-search") { state.serverQuery=event.target.value;filterServerRows(); }
+  if (event.target.id === "console-command") { state.command=event.target.value; }
+  if (event.target.id === "palette-search") {
+    state.paletteQuery=event.target.value;const root=$("#palette-results");if(root)root.innerHTML=paletteItems();
+  }
+});
+document.addEventListener("change",(event) => {
+  if (event.target.id==="log-autoscroll") {state.autoScroll=event.target.checked;scrollLogs();}
+  if (event.target.id==="server-status"){state.serverStatus=event.target.value;filterServerRows();}
+});
+document.addEventListener("click",async(event) => {
+  const target = event.target.closest("[data-action]");if (!target) return;
+  const action=target.dataset.action;
+  if (action==="navigate") {state.mobileMenu=false;return;}
+  if (action==="modal-background" && event.target===target){setModal(null);return;}
+  if (action==="modal-close"){setModal(null);return;}
+  if (action==="open-menu"){state.mobileMenu=true;render();return;}
+  if (action==="close-menu"){state.mobileMenu=false;render();return;}
+  if (action==="palette"){state.paletteQuery="";setModal({kind:"palette"});return;}
+  if (action==="palette-navigate"){navigate(target.dataset.route);return;}
+  if (action==="server-switcher"){setModal({kind:"switcher"});return;}
+  if (action==="choose-server"){
+    state.selectedId=target.dataset.id;setModal(null);state.logs=apiEnabled?[]:[...DEMO_LOGS];
+    if(apiEnabled){await loadFromApi();}
+    navigate(state.route==="dashboard"?"dashboard":"overview");return;
+  }
+  if (action==="select-server"){state.selectedId=target.dataset.id;navigate("overview");return;}
+  if (action==="server-create"){setModal({kind:"create"});return;}
+  if (action==="power-confirm"){
+    const power=target.dataset.power || "restart";
+    const title=power==="stop"?"서버를 중지할까요?":power==="restart"?"서버를 재시작할까요?":"서버를 시작할까요?";
+    setModal({kind:"confirm",title,description: selectedName()+" 서버에서 실행 중인 작업과 플레이어 연결에 영향을 줄 수 있습니다.",
+      power,confirmLabel: power==="stop"?"서버 중지":power==="restart"?"재시작":"시작",confirmAction:"power-run",danger:power==="stop"});return;
+  }
+  if (action==="power-run"){await performPowerAction();return;}
+  if (action==="download-logs"){exportLogs();return;}
+  if (action==="file-select"){state.selectedFile=target.dataset.name;render();return;}
+  if (action==="file-root"){state.filePath="/home/minecraft/server";state.selectedFile="";render();return;}
+  if (action==="file-open"){
+    const value=DEMO_FILES.find((x)=>x.name===target.dataset.name);
+    if(value?.type==="folder"){state.filePath="/home/minecraft/server/"+value.name;state.selectedFile="";render();}
+    else mockActionMessage("파일 미리보기");return;
+  }
+  if (action==="backup-create"){setModal({kind:"confirm",title:"새 백업을 생성할까요?",description:"현재 월드 상태를 백업합니다.",
+    confirmLabel:"백업 생성",confirmAction:"backup-run"});return;}
+  if (action==="backup-run"){await createBackup();return;}
+  if (action==="backup-restore"){
+    const id=target.dataset.id;setModal({kind:"confirm",title:"백업을 복원할까요?",
+      description:"백업 #"+id+"으로 복원하면 현재 월드 데이터가 바뀔 수 있습니다. 복원 전에 별도 백업을 권장합니다.",
+      id,confirmLabel:"복원",confirmAction:"restore-run",danger:true});return;}
+  if (action==="restore-run"){await restoreBackup();return;}
+  if (action==="audit-export"){downloadText("pconn-audit.txt",DEMO_AUDIT.map((x)=>[x.time,x.action,x.actor,x.target].join(" | ")).join("\n"));toast("예시 감사 기록을 내보냈습니다.");return;}
+  if (action==="theme-toggle"){
+    state.theme=state.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=state.theme;store("pconn-theme",state.theme);render();return;
+  }
+  if (action==="show-notifications"){setModal({kind:"notice",title:"알림",description:"현재 확인할 새 알림이 없습니다. 실제 서버 알림은 API 연동 이후 제공됩니다.",
+    confirmLabel:"닫기",confirmAction:"modal-close"});return;}
+  if (action==="api-retry"){await loadFromApi();return;}
+  if (["file-upload","file-new-folder","network-add","user-invite","health-check"].includes(action)){mockActionMessage(action);return;}
+  if (action==="log-level"){
+    state.level=target.dataset.level;render();$("#log-search")?.focus();return;
+  }
+});
+document.addEventListener("submit",async(event) => {
+  const form=event.target;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form"].includes(form.id))return;
+  event.preventDefault();
+  if(form.id==="console-form"){await sendCommand();return;}
+  if(form.id==="startup-form"){
+    const d=new FormData(form);
+    const input={executable:String(d.get("executable")||""),directory:String(d.get("directory")||""),
+      memory:String(d.get("memory")||""),timeout:String(d.get("timeout")||""),
+      arguments:String(d.get("arguments")||""),autoRestart:d.has("autoRestart")};
+    if(state.mode==="demo"){state.startup=input;store("pconn-startup",input);toast("예시 시작 설정만 브라우저에 저장했습니다.");}
+    else{try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/startup",{method:"PATCH",body:input});toast("설정 저장 요청이 완료되었습니다.");}catch(e){toast(e.message);}}
+    return;
+  }
+  if(form.id==="settings-form"){
+    const d=new FormData(form);
+    const values={panelName:String(d.get("panelName")||"피컨"),timezone:String(d.get("timezone")||"Asia/Seoul"),
+      sessionHours:String(d.get("sessionHours")||"24"),retention:String(d.get("retention")||"7"),audit:state.settings.audit};
+    state.settings=values;store("pconn-settings",values);toast("화면 미리보기 설정을 브라우저에 저장했습니다. 서버 정책은 변경되지 않았습니다.");return;
+  }
+  if(form.id==="schedule-form"){
+    const d=new FormData(form);const name=String(d.get("schedule-name")||"").trim();
+    if(!name)return toast("작업 이름을 입력해 주세요.");
+    if(state.mode==="demo"){state.schedules.push({id:"demo-"+Date.now(),name,when:String(d.get("schedule-cron")||""),type:String(d.get("schedule-type")||"백업"),active:false});render();toast("예시 작업에만 추가되었습니다. 실제 실행은 예약되지 않았습니다.");}
+    else{try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/schedules",{method:"POST",body:{name,cron:String(d.get("schedule-cron")),type:String(d.get("schedule-type"))}});toast("예약 작업 생성 요청이 접수되었습니다.");}catch(e){toast(e.message);}}
+    return;
+  }
+  if(form.id==="create-server-form"){
+    const d=new FormData(form);const name=String(d.get("server-name")||"").trim();
+    if(!name)return toast("서버 이름을 입력해 주세요.");
+    if(state.mode==="demo"){
+      const id="demo-"+Date.now();
+      state.servers.push({id,name,kind:String(d.get("server-kind")||"마인크래프트"),status:"stopped",players:0,maxPlayers:20,memoryGb:0,memoryLimitGb:4,cpu:0,tps:null,mspt:null,port:25569,uptime:"—",version:"예시 서버",directory:"—"});
+      state.selectedId=id;setModal(null);navigate("servers");toast("예시 서버를 목록에 추가했습니다. 실제 서버는 생성되지 않았습니다.");
+    }else{
+      try{await apiRequest("/servers",{method:"POST",body:{name,kind:String(d.get("server-kind")||"마인크래프트")}});setModal(null);await loadFromApi();toast("서버 생성 요청이 접수되었습니다.");}
+      catch(e){toast(e.message);}
+    }
+  }
+});
+render();
+if (apiEnabled) loadFromApi();
