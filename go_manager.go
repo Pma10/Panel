@@ -261,9 +261,36 @@ func (m *manager) subscribe(id string)(<-chan logEntry,func(),error){
  return ch,func(){m.mu.Lock();defer m.mu.Unlock();if _,ok:=s.subscribers[ch];ok{delete(s.subscribers,ch);close(ch)}},nil
 }
 func scanLines(r io.Reader,cb func(string)){
- scanner:=bufio.NewScanner(r);scanner.Buffer(make([]byte,8192),256*1024)
- for scanner.Scan(){cb(scanner.Text())}
- if err:=scanner.Err();err!=nil{cb("[console stream error: "+err.Error()+"]")}
+ // Keep draining even if a plugin outputs a multi-megabyte line without a
+ // newline. Stopping the reader would fill the OS pipe and stall the JVM.
+ reader:=bufio.NewReaderSize(r,32*1024)
+ line:=make([]byte,0,2048)
+ truncated:=false
+ flush:=func(){
+  if len(line)==0&&!truncated{return}
+  message:=strings.TrimRight(string(line),"\r\n")
+  if truncated{message+=" [로그 행 길이 제한으로 생략됨]"}
+  cb(message)
+  line=line[:0]
+  truncated=false
+ }
+ for{
+  segment,err:=reader.ReadSlice('\n')
+  if len(segment)>0{
+   available:=2048-len(line)
+   if available>0{
+    n:=len(segment)
+    if n>available{n=available}
+    line=append(line,segment[:n]...)
+   }
+   if len(segment)>available{truncated=true}
+  }
+  if err==nil{flush();continue}
+  if errors.Is(err,bufio.ErrBufferFull){continue}
+  flush()
+  if !errors.Is(err,io.EOF){cb("[console read error: "+err.Error()+"]")}
+  return
+ }
 }
 func (m *manager) start(id string)(map[string]any,error){
  m.mu.Lock()
