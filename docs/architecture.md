@@ -1,5 +1,7 @@
 # Panel · Go 구조 및 유지보수 가이드
 
+[← README](../README.md) · [첫 서버 시작](getting-started.md) · [운영 및 배포](go-backend.md) · [기여 가이드](../CONTRIBUTING.md)
+
 ## 기본 원칙
 
 - **하나의 Go 실행 파일:** 웹 UI는 `go:embed`로 포함합니다. 상시 Node.js·데이터베이스는 필요하지 않습니다.
