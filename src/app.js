@@ -48,7 +48,7 @@ const state = {
   servers: structuredClone(DEMO_SERVERS), logs: replaceLogHistory(DEMO_LOGS), activity: [...DEMO_ACTIVITY],
   schedules: [...DEMO_SCHEDULES], mode: apiEnabled ? "live" : "demo",
   loading: apiEnabled, apiError: "", logError: "", logLoading: false,
-  query: "", serverQuery: "", serverStatus: "all", fileQuery: "", filePath: "/home/minecraft/server", selectedFile: "",
+  query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: "/home/minecraft/server", selectedFile: "",
   level: "all", autoScroll: true, command: "", theme: getStore("pconn-theme", "light"),
   modal: null, paletteQuery: "", mobileMenu: false,
   startup: getStore("pconn-startup", { executable: "java", directory: "/srv/minecraft/main", memory: "10240", timeout: "30", arguments: "-Xms4G -Xmx10G -jar pma-paper.jar nogui", autoRestart: true }),
@@ -58,6 +58,7 @@ document.documentElement.dataset.theme = state.theme === "dark" ? "dark" : "ligh
 let toastTimer = null, logClose = null, logRenderTimer = null;
 let logFetchVersion = 0, loadVersion = 0, commandPending = false;
 const LOG_FLUSH_MS = 130;
+const SERVER_PAGE_SIZE = 60;
 const server = () => state.servers.find((s) => s.id === state.selectedId) || state.servers[0] || null;
 const routeTitle = () => routeMap[state.route]?.label || "대시보드";
 const selectedName = () => server()?.name || "서버 없음";
@@ -124,7 +125,7 @@ function renderDashboard() {
     <div class="dashboard-layout">
       ${card("내 서버",`<div class="table-scroll"><table class="data-table">
         <thead><tr><th>서버 이름</th><th>상태</th><th class="numeric">플레이어</th><th class="numeric">메모리</th></tr></thead>
-        <tbody>${renderServerRows(state.servers)}</tbody></table></div>`,`<a href="#/servers">전체 서버 보기 →</a>`)}
+        <tbody>${renderServerRows(state.servers.slice(0,8))}</tbody></table></div>`,`<a href="#/servers">전체 서버 보기 →</a>`)}
       ${card("최근 활동",`<div class="activity-list">${activities || '<div class="empty-state"><strong>활동 내역 API 미연결</strong><p>실제 서버 활동 기록을 불러올 수 없습니다.</p></div>'}</div>`,state.mode==="demo"?`<a href="#/audit">전체 보기</a>`:"")}
     </div>${demoNote()}`;
 }
@@ -138,7 +139,7 @@ function renderServers() {
       <div class="toolbar-spacer"></div><span class="demo-ribbon">${state.servers.length}대 등록</span></div>
     ${card("서버 목록",`<div class="table-scroll"><table class="data-table">
       <thead><tr><th>서버 이름</th><th>상태</th><th class="numeric">접속 인원</th><th class="numeric">메모리</th><th>관리</th></tr></thead>
-      <tbody id="server-results">${renderServerRows(state.servers,true)}</tbody></table></div>`)}
+      <tbody id="server-results">${renderServerRows(state.servers.slice(0,SERVER_PAGE_SIZE),true)}</tbody></table></div><div class="server-pagination" id="server-pagination"></div>`)}
     ${demoNote()}`;
 }
 function renderOverview() {
@@ -162,14 +163,14 @@ function renderOverview() {
     <h2>${h(s.name)}</h2><p>${h(s.version)} · 가동 ${h(s.uptime)}</p></div>${badge(s.status)}<div class="page-actions">${action}</div></div>
     <div class="grid-stats">${metrics}</div><div class="two-col">${resources}</div>
     ${card("실행 환경",`<div class="info-list"><div class="info-line"><strong>실행 경로</strong><span class="right mono">${h(s.directory)}</span></div>
-    <div class="info-line"><strong>접속 포트</strong><span class="right mono">${s.port}</span></div></div>`)}
+    <div class="info-line"><strong>접속 포트</strong><span class="right mono">${h(s.port)}</span></div></div>`)}
     ${demoNote()}`;
 }
 const emptyServer = () => `<div class="card empty-state">${icon("server","large")}<strong>선택된 서버가 없습니다</strong><p>서버 목록에서 서버를 선택하세요.</p><a class="btn" href="#/servers">서버 목록 열기</a></div>`;
 function renderLogRows() {
   const rows = recentLogs(state.logs,state.query,state.level);
   if (!rows.length) return `<div class="log-empty">조건에 맞는 로그가 없습니다.</div>`;
-  return rows.map((row,i) => `<div class="log-line ${row.level.toLowerCase()}" role="row">
+  return rows.map((row,i) => `<div class="log-line ${/^(INFO|WARN|ERROR)$/i.test(row.level) ? row.level.toLowerCase() : "other"}" role="row">
     <span class="mono">${String(i+1).padStart(2,"0")}</span>
     <span class="log-time mono">${h(row.time)}</span>
     <span class="log-level mono">${h(row.level)}</span>
@@ -478,11 +479,23 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && state.route === "console") updateLogRows();
 });
 function filterServerRows() {
+  const rows = $("#server-results");
+  const pagination = $("#server-pagination");
+  if (!rows || !pagination) return;
   const term = state.serverQuery.trim().toLocaleLowerCase("ko");
-  document.querySelectorAll("[data-server-row]").forEach((tr) => {
-    const text = tr.dataset.filterText || "";
-    tr.hidden = !(!term || text.includes(term)) || (state.serverStatus !== "all" && tr.dataset.status !== state.serverStatus);
-  });
+  const matches = state.servers.filter((item) =>
+    (!term || (item.name + " " + item.kind + " " + item.id).toLocaleLowerCase("ko").includes(term)) &&
+    (state.serverStatus === "all" || item.status === state.serverStatus)
+  );
+  const pageCount = Math.max(1,Math.ceil(matches.length / SERVER_PAGE_SIZE));
+  state.serverPage = Math.max(0,Math.min(state.serverPage,pageCount-1));
+  const start = state.serverPage * SERVER_PAGE_SIZE;
+  rows.innerHTML = renderServerRows(matches.slice(start,start+SERVER_PAGE_SIZE),true);
+  pagination.innerHTML = '<span>' + matches.length + '대 중 ' +
+    (matches.length ? (start+1) : 0) + '–' + Math.min(start+SERVER_PAGE_SIZE,matches.length) + '대 표시</span>' +
+    '<div class="pagination-buttons"><button class="btn small" data-action="server-page-prev" ' + (!state.serverPage ? 'disabled' : '') + '>이전</button>' +
+    '<span>' + (state.serverPage+1) + ' / ' + pageCount + '</span>' +
+    '<button class="btn small" data-action="server-page-next" ' + (state.serverPage+1>=pageCount ? 'disabled' : '') + '>다음</button></div>';
 }
 function navigate(route) {
   if (!routeMap[route]) return;
@@ -636,7 +649,9 @@ async function loadFromApi() {
     state.servers = items.filter((it) => it && typeof it.id === "string" && typeof it.name === "string")
       .map((it) => ({...it,status:it.status||"unknown",players:Number(it.players)||0,maxPlayers:Number(it.maxPlayers)||0,
         memoryGb:Number(it.memoryGb)||0,memoryLimitGb:Number(it.memoryLimitGb)||1,cpu:Number(it.cpu)||0,
-        directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—"}));
+        directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—",
+        tps:it.tps==null?null:(Number.isFinite(Number(it.tps))?Number(it.tps):null),
+        mspt:it.mspt==null?null:(Number.isFinite(Number(it.mspt))?Number(it.mspt):null)}));
     if (!state.servers.some((s) => s.id === state.selectedId)) state.selectedId = state.servers[0]?.id || "";
     if (state.selectedId) await loadSelectedLogs();
   } catch (error) {
@@ -692,7 +707,7 @@ document.addEventListener("keydown",(event) => {
 });
 document.addEventListener("input",(event) => {
   if (event.target.id === "log-search") { state.query=event.target.value;scheduleLogUpdate(); }
-  if (event.target.id === "server-search") { state.serverQuery=event.target.value;filterServerRows(); }
+  if (event.target.id === "server-search") { state.serverQuery=event.target.value;state.serverPage=0;filterServerRows(); }
   if (event.target.id === "console-command") { state.command=event.target.value; }
   if (event.target.id === "palette-search") {
     state.paletteQuery=event.target.value;const root=$("#palette-results");if(root)root.innerHTML=paletteItems();
@@ -700,7 +715,7 @@ document.addEventListener("input",(event) => {
 });
 document.addEventListener("change",(event) => {
   if (event.target.id==="log-autoscroll") {state.autoScroll=event.target.checked;scrollLogs();}
-  if (event.target.id==="server-status"){state.serverStatus=event.target.value;filterServerRows();}
+  if (event.target.id==="server-status"){state.serverStatus=event.target.value;state.serverPage=0;filterServerRows();}
 });
 document.addEventListener("click",async(event) => {
   const target = event.target.closest("[data-action]");if (!target) return;
@@ -726,6 +741,8 @@ document.addEventListener("click",async(event) => {
     return;
   }
   if (action==="server-create"){setModal({kind:"create"});return;}
+  if (action==="server-page-prev"){state.serverPage=Math.max(0,state.serverPage-1);filterServerRows();return;}
+  if (action==="server-page-next"){state.serverPage++;filterServerRows();return;}
   if (action==="power-confirm"){
     const power=target.dataset.power || "restart";
     const title=power==="stop"?"서버를 중지할까요?":power==="restart"?"서버를 재시작할까요?":"서버를 시작할까요?";
