@@ -66,6 +66,8 @@ type manager struct{
  servers map[string]*managedServer
  closing bool
  stopScheduler chan struct{}
+ crashHistory map[string][]time.Time
+ pendingRestarts map[string]*time.Timer
 }
 func makeID()string{
  b:=make([]byte,8)
@@ -75,7 +77,7 @@ func makeID()string{
 func newManager(root,javaBin string)(*manager,error){
  if err:=os.MkdirAll(filepath.Join(root,"servers"),0700);err!=nil{return nil,err}
  if err:=os.MkdirAll(filepath.Join(root,"backups"),0700);err!=nil{return nil,err}
- m:=&manager{root:root,javaBin:javaBin,servers:map[string]*managedServer{},stopScheduler:make(chan struct{})}
+ m:=&manager{root:root,javaBin:javaBin,servers:map[string]*managedServer{},stopScheduler:make(chan struct{}),crashHistory:map[string][]time.Time{},pendingRestarts:map[string]*time.Timer{}}
  buf,err:=os.ReadFile(filepath.Join(root,"config.json"))
  if err!=nil && !errors.Is(err,os.ErrNotExist){return nil,err}
  if len(buf)>0{
@@ -224,6 +226,7 @@ func (m *manager) start(id string)(map[string]any,error){
  m.mu.Lock()
  s,err:=m.get(id);if err!=nil{m.mu.Unlock();return nil,err}
  if s.process!=nil||s.busy||m.closing{m.mu.Unlock();return nil,apiError{409,"서버가 실행 중이거나 작업 중입니다."}}
+ if timer:=m.pendingRestarts[id];timer!=nil{timer.Stop();delete(m.pendingRestarts,id)}
  if !s.cfg.EulaAccepted{m.mu.Unlock();return nil,apiError{409,"Minecraft EULA 동의가 필요합니다."}}
  if !validJar(s.cfg.Jar){m.mu.Unlock();return nil,apiError{400,"JAR 이름이 올바르지 않습니다."}}
  folder:=m.dir(id)
@@ -252,9 +255,11 @@ func (m *manager) start(id string)(map[string]any,error){
   stdin.Close()
   m.mu.Lock()
   if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false}
+  restart:=err!=nil&&!p.expectedStop&&s.cfg.AutoRestart&&!m.closing
   m.mu.Unlock()
   if err!=nil{m.log(id,"WARN","Java 종료: "+err.Error())}else{m.log(id,"INFO","Java 정상 종료")}
   close(p.done)
+  if restart{m.scheduleCrashRestart(id,p.started)}
  }()
  return result,nil
 }
@@ -274,7 +279,10 @@ func (m *manager) stop(id string)error{
  m.mu.Lock();s,err:=m.get(id)
  if err!=nil{m.mu.Unlock();return err}
  p:=s.process
- if p==nil{m.mu.Unlock();return apiError{409,"서버가 중지 상태입니다."}}
+ if p==nil{
+  if timer:=m.pendingRestarts[id];timer!=nil{timer.Stop();delete(m.pendingRestarts,id);m.mu.Unlock();return nil}
+  m.mu.Unlock();return apiError{409,"서버가 중지 상태입니다."}
+ }
  if p.state=="stopping"{m.mu.Unlock();return nil}
  p.state="stopping";p.expectedStop=true;m.mu.Unlock()
  _,_=io.WriteString(p.stdin,"stop\n")
@@ -293,9 +301,39 @@ func (m *manager) restart(id string)(map[string]any,error){
  }
  return m.start(id)
 }
+func (m *manager) scheduleCrashRestart(id string,started time.Time){
+ m.mu.Lock()
+ s,ok:=m.servers[id]
+ if !ok||m.closing||!s.cfg.AutoRestart||s.process!=nil||m.pendingRestarts[id]!=nil{
+  m.mu.Unlock();return
+ }
+ now:=time.Now()
+ recent:=[]time.Time{}
+ for _,at:=range m.crashHistory[id]{if now.Sub(at)<10*time.Minute{recent=append(recent,at)}}
+ if now.Sub(started)>10*time.Minute{recent=nil}
+ if len(recent)>=3{
+  m.crashHistory[id]=recent;m.mu.Unlock()
+  m.log(id,"ERROR","10분 동안 3회 재시작 실패: 자동 재시작을 중단했습니다.")
+  return
+ }
+ recent=append(recent,now)
+ m.crashHistory[id]=recent
+ delay:=time.Duration(5<<uint(len(recent)-1))*time.Second
+ m.pendingRestarts[id]=time.AfterFunc(delay,func(){
+  m.mu.Lock()
+  delete(m.pendingRestarts,id)
+  stopped:=m.closing||!m.servers[id].cfg.AutoRestart
+  m.mu.Unlock()
+  if stopped{return}
+  if _,err:=m.start(id);err!=nil{m.log(id,"ERROR","자동 재시작 실패: "+err.Error())}
+ })
+ m.mu.Unlock()
+ m.log(id,"WARN",fmt.Sprintf("비정상 종료: %s 후 자동 재시작 (%d/3)",delay,len(recent)))
+}
 func (m *manager) shutdown(ctx context.Context)error{
  m.mu.Lock()
  if !m.closing{m.closing=true;close(m.stopScheduler)}
+ for id,timer:=range m.pendingRestarts{timer.Stop();delete(m.pendingRestarts,id)}
  ids:=[]string{}
  for id,s:=range m.servers{if s.process!=nil{ids=append(ids,id)}}
  m.mu.Unlock()
