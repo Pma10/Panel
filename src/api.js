@@ -39,10 +39,11 @@ export async function apiRequest(path, { method = "GET", body } = {}) {
   if (response.status === 204) return null;
   return response.json();
 }
-export function streamLogs(serverId, onEntry, onError) {
+export function streamLogs(serverId, onEntry, onError, onOpen) {
   if (!apiEnabled) return () => {};
   const endpointUrl = endpoint("/servers/" + encodeURIComponent(serverId) + "/logs/stream");
   const source = new EventSource(endpointUrl, { withCredentials: false });
+  source.onopen = () => onOpen?.();
   source.onmessage = (message) => {
     try {
       const entry = JSON.parse(message.data);
@@ -50,5 +51,5 @@ export function streamLogs(serverId, onEntry, onError) {
     } catch { onError?.(new Error("로그 이벤트 파싱 실패")); }
   };
   source.onerror = () => onError?.(new Error("실시간 로그 연결 오류"));
-  return () => source.close();
+  return () => { source.onmessage = null; source.onerror = null; source.onopen = null; source.close(); };
 }
