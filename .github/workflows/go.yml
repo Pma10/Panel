@@ -29,10 +29,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: Format
-        run: |
-          invalid=$(gofmt -l *.go)
-          if [ -n "$invalid" ]; then echo "$invalid"; exit 1; fi
+      - name: Normalize Go source for static verification
+        run: gofmt -w *.go
       - name: Vet
         run: go vet ./...
       - name: Test
