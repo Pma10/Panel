@@ -105,8 +105,13 @@ func (m *manager) saveLocked()error{
  for _,s:=range m.servers{f.Servers=append(f.Servers,s.cfg)}
  buf,err:=json.MarshalIndent(f,"","  ");if err!=nil{return err}
  tmp:=filepath.Join(m.root,".panel-"+makeID()+".json")
- if err:=os.WriteFile(tmp,buf,0600);err!=nil{return err}
+ file,err:=os.OpenFile(tmp,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600)
+ if err!=nil{return err}
+ if _,err=file.Write(buf);err!=nil{file.Close();os.Remove(tmp);return err}
+ if err=file.Sync();err!=nil{file.Close();os.Remove(tmp);return err}
+ if err=file.Close();err!=nil{os.Remove(tmp);return err}
  if err:=os.Rename(tmp,filepath.Join(m.root,"config.json"));err!=nil{os.Remove(tmp);return err}
+ if directory,err:=os.Open(m.root);err==nil{_ = directory.Sync();_ = directory.Close()}
  return nil
 }
 func (m *manager) describe(s *managedServer)map[string]any{
@@ -183,10 +188,15 @@ func (m *manager) update(id string,body map[string]json.RawMessage)(map[string]a
  if v,ok:=body["jar"];ok{if json.Unmarshal(v,&next.Jar)!=nil||!validJar(next.Jar){return nil,apiError{400,"JAR 이름이 올바르지 않습니다."}}}
  if v,ok:=body["autoRestart"];ok{if json.Unmarshal(v,&next.AutoRestart)!=nil{return nil,apiError{400,"자동 재시작 값이 올바르지 않습니다."}}}
  if v,ok:=body["eulaAccepted"];ok{if json.Unmarshal(v,&next.EulaAccepted)!=nil{return nil,apiError{400,"EULA 값이 올바르지 않습니다."}}}
- s.cfg=next
- if err:=m.saveLocked();err!=nil{s.cfg=old;return nil,err}
- if old.EulaAccepted!=next.EulaAccepted{
+ eulaChanged:=old.EulaAccepted!=next.EulaAccepted
+ if eulaChanged{
   if err:=os.WriteFile(filepath.Join(m.dir(id),"eula.txt"),[]byte(fmt.Sprintf("eula=%t\n",next.EulaAccepted)),0600);err!=nil{return nil,err}
+ }
+ s.cfg=next
+ if err:=m.saveLocked();err!=nil{
+  s.cfg=old
+  if eulaChanged{_ = os.WriteFile(filepath.Join(m.dir(id),"eula.txt"),[]byte(fmt.Sprintf("eula=%t\n",old.EulaAccepted)),0600)}
+  return nil,err
  }
  return m.describe(s),nil
 }
