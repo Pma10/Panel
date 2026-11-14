@@ -316,3 +316,10 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+@media (min-width: 761px) and (max-width: 1000px) {
+  .summary-strip { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+  .summary-primary { grid-column: 1 / -1; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+  .summary-secondary { padding-left: 0; border-left: 0; }
+  .page-heading { flex-wrap: wrap; }
+}
