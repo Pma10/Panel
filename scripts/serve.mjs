@@ -42,6 +42,15 @@ export function createStaticServer(root = process.cwd()) {
       return;
     }
     if (pathname === "/") pathname = "/index.html";
+    if (pathname === "/panel-config.js") {
+      res.writeHead(200, {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff"
+      });
+      res.end(req.method === "HEAD" ? undefined : 'window.PCONN_API_BASE = "";');
+      return;
+    }
     if (!isPublicPath(pathname)) {
       res.writeHead(404, { "X-Content-Type-Options": "nosniff" });
       res.end("Not found");
