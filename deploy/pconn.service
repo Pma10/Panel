@@ -1,5 +1,5 @@
 [Unit]
-Description=PConn Minecraft Control Panel (Go)
+Description=Panel - Minecraft Server Management (Go)
 After=network-online.target
 Wants=network-online.target
 
