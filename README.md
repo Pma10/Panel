@@ -8,6 +8,18 @@
 
 운영 패널은 Go 단일 실행 파일을 기본으로 합니다. Docker를 사용하지 않는 구성이 가장 단순하며, 운영 서버를 맡긴다면 `pconn` 전용 비특권 사용자와 systemd를 권장합니다.
 
+**첫 릴리스 이전에도 소스 체크아웃에서 다음 명령으로 설치·업데이트를 시도할 수 있어.** Go 1.23+, Java 21, systemd, sudo가 필요하며, Go 테스트에 실패하면 설치를 중단합니다.
+
+```bash
+# 소스에서 검사 → 빌드 → systemd 설치/교체
+bash scripts/build-install-linux.sh
+
+# 파일로 직접 설치·교체하는 방식도 지원
+go build -o ./pconn .
+sudo bash scripts/pconnctl-linux.sh install-local ./pconn
+sudo bash scripts/pconnctl-linux.sh update-local ./pconn
+```
+
 **중요:** 현재 GitHub에는 아직 릴리스가 게시되지 않았습니다. 따라서 아래 다운로드 설치 명령은 첫 버전 태그와 GitHub Release가 정상 발행된 **이후에만** 사용할 수 있습니다.
 
 ```bash
