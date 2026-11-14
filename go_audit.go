@@ -51,6 +51,16 @@ func (a *auditLog)append(action,serverID string){
   data,_:=json.Marshal(entry)
   _,_=file.Write(append(data,'\n'))
   _=file.Close()
+  if info,err:=os.Stat(a.path);err==nil&&info.Size()>4<<20{
+   tmp:=a.path+".compact"
+   next,err:=os.OpenFile(tmp,os.O_CREATE|os.O_TRUNC|os.O_WRONLY,0600)
+   if err==nil{
+    encode:=json.NewEncoder(next)
+    for _,saved:=range a.entries{if err=encode.Encode(saved);err!=nil{break}}
+    closeErr:=next.Close()
+    if err==nil&&closeErr==nil{_ = os.Rename(tmp,a.path)}else{_ = os.Remove(tmp)}
+   }
+  }
  }
 }
 func (a *auditLog)read()[]auditEntry{
