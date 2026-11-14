@@ -51,7 +51,7 @@ const state = {
   authenticated: !apiEnabled, authLoading: apiEnabled, authError: "", username:"관리자",
   query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: apiEnabled?"":"/home/minecraft/server", selectedFile: "",
   fileEntries: [], fileLoading:false, fileText:"", backups:[], backupLoading:false, viewRequest:0, viewError:"",
-  network:[], startupLive:null, health:null, audit:[], viewLoading:false,
+  network:[], startupLive:null, health:null, audit:[], diagnostics:null, viewLoading:false,
   level: "all", autoScroll: true, command: "", theme: getStore("pconn-theme", "light"),
   modal: null, paletteQuery: "", mobileMenu: false,
   startup: getStore("pconn-startup", { executable: "java", directory: "/srv/minecraft/main", memory: "10240", timeout: "30", arguments: "-Xms4G -Xmx10G -jar pma-paper.jar nogui", autoRestart: true }),
@@ -303,15 +303,15 @@ function renderFiles() {
 
 async function refreshRouteData(){
   if(state.mode!=="live" || !state.authenticated)return;
-  if(!state.selectedId && state.route!=="audit")return;
+  if(!state.selectedId && !["audit","settings"].includes(state.route))return;
   if(state.route==="files"){await loadFiles();return;}
   const route=state.route;
-  const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit"};
+  const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit",settings:"diagnostics"};
   if(!endpoints[route])return;
   const id=state.selectedId,seq=++state.viewRequest;
   state.viewError="";state.viewLoading=true;render();
   try{
-    const path=route==="audit"?"/audit":"/servers/"+encodeURIComponent(id)+"/"+endpoints[route];
+    const path=route==="audit"?"/audit":route==="settings"?"/diagnostics":"/servers/"+encodeURIComponent(id)+"/"+endpoints[route];
     const response=await apiRequest(path);
     if(seq!==state.viewRequest || id!==state.selectedId || route!==state.route)return;
     if(route==="backups")state.backups=Array.isArray(response.backups)?response.backups:[];
@@ -320,6 +320,7 @@ async function refreshRouteData(){
     if(route==="schedules")state.schedules=Array.isArray(response.schedules)?response.schedules:[];
     if(route==="health")state.health=response;
     if(route==="audit")state.audit=Array.isArray(response.entries)?response.entries:[];
+    if(route==="settings")state.diagnostics=response;
   }catch(e){if(seq===state.viewRequest)state.viewError=e.message;}
   finally{if(seq===state.viewRequest){state.viewLoading=false;if(route===state.route)render();}}
 }
@@ -533,14 +534,24 @@ function renderAudit() {
       </tbody></table></div>`)}${demoNote()}`;
 }
 function renderSettings() {
-  if(state.mode==="live")return header("패널 설정","브라우저에 적용되는 표시 옵션과 보안 안내")+
+  if(state.mode==="live")return header("패널 설정","브라우저에 적용되는 표시 옵션과 보안 안내",button("메모리 상태 새로고침","diagnostics-refresh"))+
     card("화면 설정",'<div class="info-list"><div class="info-line"><div><strong>어두운 테마</strong>'+
       '<p>브라우저에만 저장되는 화면 설정입니다.</p></div>'+
       '<button class="switch '+(state.theme==="dark"?"on":"")+'" role="switch" type="button" aria-checked="'+(state.theme==="dark")+'" aria-label="다크 모드" data-action="theme-toggle"></button></div></div>')+
     card("관리자 보안",'<div class="info-list"><div class="info-line"><div><strong>단일 관리자 세션</strong>'+
       '<p>세션 만료 시간은 8시간입니다. 관리자 비밀번호는 서버 환경 변수에서만 변경할 수 있습니다.</p></div>'+
       button("로그아웃","logout")+'</div></div>')+
-    '<p class="hint">백업 보관 정책과 세션 유효 시간을 변경하는 UI는 아직 제공되지 않습니다.</p>';
+    (state.diagnostics?card("Go 패널 메모리·성능 진단",
+      '<div class="info-list">'+
+      '<div class="info-line"><strong>Go 힙 사용량</strong><span class="right">'+fileSize(state.diagnostics.goHeapBytes)+'</span></div>'+
+      '<div class="info-line"><strong>Go 런타임 전체 예약</strong><span class="right">'+fileSize(state.diagnostics.goTotalSysBytes)+'</span></div>'+
+      '<div class="info-line"><strong>메모리 소프트 제한</strong><span class="right">'+fileSize(state.diagnostics.memoryLimitBytes)+'</span></div>'+
+      '<div class="info-line"><strong>관리 중인 Java 프로세스</strong><span class="right">'+h(state.diagnostics.managedProcesses)+'</span></div>'+
+      '<div class="info-line"><strong>메모리 로그 수</strong><span class="right">'+h(state.diagnostics.logEntries)+'</span></div>'+
+      '<div class="info-line"><strong>실시간 로그 연결</strong><span class="right">'+h(state.diagnostics.logSubscribers)+'</span></div>'+
+      '<div class="info-line"><strong>GC 실행 횟수</strong><span class="right">'+h(state.diagnostics.goGCCycles)+'</span></div>'+
+      '</div>'):'')+
+    '<p class="hint">Go 런타임 통계는 Java RSS와 다른 값입니다. 서버별 격리 및 실제 Java 전체 메모리 제한은 아직 제공하지 않습니다.</p>';
   const st = state.settings;
   return `${header("설정","브라우저 화면 설정을 관리합니다. 서버 정책은 변경되지 않습니다")}
     <form id="settings-form" class="stack"><section class="card settings-card"><h2>기본 설정</h2>
@@ -1215,6 +1226,7 @@ document.addEventListener("click",async(event) => {
     }catch(e){toast(e.message);}
     return;
   }
+  if(action==="diagnostics-refresh"){await refreshRouteData();return;}
   if (action==="health-check"){
     if(state.mode==="live")await refreshRouteData();else toast("예시 데이터만 표시 중입니다.");return;
   }
