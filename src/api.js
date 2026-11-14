@@ -52,6 +52,7 @@ export async function uploadFile(serverId,path,file){
   });
   return result;
 }
+export const fileDownloadUrl = (serverId,path) => endpoint("/servers/"+encodeURIComponent(serverId)+"/files/download?path="+encodeURIComponent(path));
 export async function downloadFile(serverId,path){
   const response=await fetch(endpoint("/servers/"+encodeURIComponent(serverId)+"/files/download?path="+encodeURIComponent(path)),{
     credentials:"same-origin",signal:AbortSignal.timeout(120000)
