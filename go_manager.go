@@ -335,12 +335,21 @@ func (m *manager) start(id string)(map[string]any,error){
  cmd:=exec.Command(m.javaBin,fmt.Sprintf("-Xms%dM",min(s.cfg.MemoryMb,512)),
   fmt.Sprintf("-Xmx%dM",s.cfg.MemoryMb),"-jar",s.cfg.Jar,"nogui")
  cmd.Dir=folder;cmd.Env=javaEnv();configureJavaChild(cmd)
- stdout,err:=cmd.StdoutPipe();if err!=nil{m.mu.Unlock();return nil,err}
- stderr,err:=cmd.StderrPipe();if err!=nil{m.mu.Unlock();return nil,err}
+ // Use exec.Cmd's built-in copy workers instead of waiting indefinitely
+ // for externally inherited stdout/stderr pipes to close.
+ stdout:=&boundedConsoleWriter{writeLog:func(line string){m.log(id,"INFO",line)}}
+ stderr:=&boundedConsoleWriter{writeLog:func(line string){m.log(id,"WARN",line)}}
+ cmd.Stdout=stdout
+ cmd.Stderr=stderr
+ cmd.WaitDelay=3*time.Second
  stdin,err:=cmd.StdinPipe();if err!=nil{m.mu.Unlock();return nil,err}
  if err:=cmd.Start();err!=nil{m.mu.Unlock();stdin.Close();return nil,apiError{500,"Java 실행 실패: "+err.Error()}}
  if err:=os.WriteFile(filepath.Join(folder,".panel-process"),[]byte(strconv.Itoa(cmd.Process.Pid)+"\n"),0600);err!=nil{
-  _=cmd.Process.Kill();_ = cmd.Wait();m.mu.Unlock();stdin.Close()
+  _=cmd.Process.Kill()
+  // Let the internal output writers finish; they also need manager.mu.
+  m.mu.Unlock()
+  _=cmd.Wait()
+  _=stdin.Close()
   return nil,apiError{500,"Java PID 기록에 실패해 실행을 취소했습니다."}
  }
  p:=&managedProcess{cmd:cmd,stdin:stdin,done:make(chan struct{}),state:"starting",started:time.Now()}
@@ -348,14 +357,11 @@ func (m *manager) start(id string)(map[string]any,error){
  result:=m.describe(s)
  m.mu.Unlock()
  m.log(id,"INFO",fmt.Sprintf("Java 시작 PID %d",cmd.Process.Pid))
- var pipes sync.WaitGroup
- pipes.Add(2)
- go func(){defer pipes.Done();scanLines(stdout,func(line string){m.log(id,"INFO",line)})}()
- go func(){defer pipes.Done();scanLines(stderr,func(line string){m.log(id,"WARN",line)})}()
  go func(){
-  pipes.Wait()
   err:=cmd.Wait()
-  stdin.Close()
+  stdout.Flush()
+  stderr.Flush()
+  _=stdin.Close()
   _=os.Remove(filepath.Join(folder,".panel-process"))
   m.mu.Lock()
   if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false}
