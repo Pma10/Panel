@@ -1,7 +1,7 @@
 
 import { DEMO_SERVERS, DEMO_LOGS, DEMO_ACTIVITY, DEMO_FILES, DEMO_BACKUPS, DEMO_SCHEDULES, DEMO_USERS, DEMO_AUDIT, ROUTE_INFO } from "./data.js";
 import { escapeHtml as h, filterLogs, serverSummary, formatMemory, validateCommand, routeFromHash, appendBoundedLog, replaceLogHistory, recentLogs } from "./utils.mjs";
-import { apiEnabled, apiRequest, streamLogs } from "./api.js";
+import { apiEnabled, apiRequest, streamLogs, getSession, signIn, signOut, uploadFile, downloadFile } from "./api.js";
 
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => h(value);
@@ -48,7 +48,10 @@ const state = {
   servers: structuredClone(DEMO_SERVERS), logs: replaceLogHistory(DEMO_LOGS), activity: [...DEMO_ACTIVITY],
   schedules: [...DEMO_SCHEDULES], mode: apiEnabled ? "live" : "demo",
   loading: apiEnabled, apiError: "", logError: "", logLoading: false,
-  query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: "/home/minecraft/server", selectedFile: "",
+  authenticated: !apiEnabled, authLoading: apiEnabled, authError: "", username:"관리자",
+  query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: apiEnabled?"":"/home/minecraft/server", selectedFile: "",
+  fileEntries: [], fileLoading:false, fileText:"", backups:[], backupLoading:false,
+  network:[], startupLive:null, health:null,
   level: "all", autoScroll: true, command: "", theme: getStore("pconn-theme", "light"),
   modal: null, paletteQuery: "", mobileMenu: false,
   startup: getStore("pconn-startup", { executable: "java", directory: "/srv/minecraft/main", memory: "10240", timeout: "30", arguments: "-Xms4G -Xmx10G -jar pma-paper.jar nogui", autoRestart: true }),
@@ -81,7 +84,7 @@ function renderSidebar() {
     <nav class="nav-group" style="margin-top:15px">${sectionNav("server")}</nav>
     <hr class="side-rule" /><div class="side-caption">관리</div>
     <nav class="nav-group">${sectionNav("admin")}</nav>
-    <div class="user-summary"><span class="avatar">P</span><span><strong>${state.mode==="demo"?"Pma":"연결된 계정"}</strong><small>${state.mode==="demo"?"소유자 · 미리보기":"계정 API 미연결"}</small></span></div>
+    <div class="user-summary"><span class="avatar">P</span><span><strong>${state.mode==="demo"?"Pma":h(state.username)}</strong><small>${state.mode==="demo"?"소유자 · 미리보기":"관리자"}</small></span>${apiEnabled?`<button class="icon-button" data-action="logout" title="로그아웃" aria-label="로그아웃">${icon("power","small")}</button>`:""}</div>
   </aside>`;
 }
 function renderChrome() {
@@ -410,10 +413,43 @@ function paletteItems() {
   return items.map((item) => `<button class="palette-item" data-action="palette-navigate" data-route="${h(item.route)}">
     ${icon(item.icon)}<span>${h(item.label)}</span>${icon("arrow","small")}</button>`).join("");
 }
+function renderLogin() {
+  return '<main class="login-screen"><div class="login-brand"><strong>피컨</strong><small>마인크래프트 서버 관리</small></div>' +
+    '<form class="login-card" id="login-form" autocomplete="on">' +
+      '<h1>관리자 로그인</h1><p>관리 패널에 접근하려면 비밀번호를 입력하세요.</p>' +
+      '<div class="form-group"><label for="admin-password">관리자 비밀번호</label>' +
+        '<input class="field" id="admin-password" name="password" type="password" minlength="12" maxlength="4096" autocomplete="current-password" required autofocus></div>' +
+      (state.authError?'<div class="login-error" role="alert">'+h(state.authError)+'</div>':'') +
+      '<button type="submit" class="btn primary login-submit">로그인</button>' +
+      '<small class="login-footnote">관리 서버에서 지정한 비밀번호를 사용합니다. 이 연결은 '+(location.protocol==="https:"?"HTTPS":"로컬 접속")+'입니다.</small>' +
+    '</form></main>';
+}
+async function bootstrapAuth() {
+  if (!apiEnabled) return;
+  try {
+    const session=await getSession();
+    state.authenticated=Boolean(session?.authenticated);
+    state.username=session?.username || "관리자";
+    state.authError="";
+  } catch(e) {
+    state.authenticated=false;
+    if(e?.status!==401) state.authError="인증 서버에 연결할 수 없습니다: "+e.message;
+  } finally {
+    state.authLoading=false;
+    render();
+    if(state.authenticated) await loadFromApi();
+  }
+}
 function render() {
   document.title = routeTitle() + " · 피컨";
   const app = $("#app");
   if (!app) return;
+  if (apiEnabled && !state.authenticated) {
+    app.innerHTML=state.authLoading?
+      '<main class="login-screen"><div class="login-card"><h1>연결 확인 중</h1><p>관리자 세션을 확인하고 있습니다.</p></div></main>' :
+      renderLogin();
+    return;
+  }
   let content = "";
   if (state.loading) {
     content = `<div class="card empty-state">${icon("refresh","large")}<strong>서버 정보를 불러오는 중입니다</strong><p>연결된 API에 요청하고 있습니다.</p></div>`;
@@ -773,6 +809,11 @@ document.addEventListener("click",async(event) => {
   if (action==="show-notifications"){setModal({kind:"notice",title:"알림",description:"현재 확인할 새 알림이 없습니다. 실제 서버 알림은 API 연동 이후 제공됩니다.",
     confirmLabel:"닫기",confirmAction:"modal-close"});return;}
   if (action==="api-retry"){await loadFromApi();return;}
+  if (action==="logout"){
+    try{await signOut();}catch(e){toast(e.message);}
+    if(logClose){logClose();logClose=null;}
+    state.authenticated=false;state.authError="";state.logs=[];state.servers=[];render();return;
+  }
   if (["file-upload","file-new-folder","network-add","user-invite","health-check"].includes(action)){mockActionMessage(action);return;}
   if (action==="log-level"){
     state.level=target.dataset.level;
@@ -787,6 +828,15 @@ document.addEventListener("click",async(event) => {
 });
 document.addEventListener("submit",async(event) => {
   const form=event.target;
+  if(form.id==="login-form"){
+    event.preventDefault();
+    const password=String(new FormData(form).get("password")||"");
+    const submit=form.querySelector('[type="submit"]');if(submit)submit.disabled=true;
+    try{const session=await signIn(password);state.authenticated=true;state.authError="";state.username=session.username||"관리자";await loadFromApi();}
+    catch(e){state.authError=e.message;render();}
+    finally{if(submit?.isConnected)submit.disabled=false;}
+    return;
+  }
   if(!["console-form","startup-form","settings-form","schedule-form","create-server-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="console-form"){await sendCommand();return;}
@@ -832,4 +882,4 @@ window.addEventListener("pagehide", () => {
   if (logClose) { logClose(); logClose = null; }
   clearTimeout(toastTimer);
 });
-if (apiEnabled) loadFromApi();
+if (apiEnabled) bootstrapAuth();
