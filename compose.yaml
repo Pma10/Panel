@@ -1,0 +1,31 @@
+# Place an HTTPS reverse proxy in front of this panel.
+# The admin port is exposed ONLY on host loopback.
+services:
+  pconn:
+    build: .
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    environment:
+      PANEL_PUBLIC_ORIGIN: ${PANEL_PUBLIC_ORIGIN:?Set the HTTPS origin for the reverse proxy}
+      PANEL_ADMIN_PASSWORD: ${PANEL_ADMIN_PASSWORD:?Set a strong admin password}
+      PANEL_BIND_HOST: 0.0.0.0
+      PANEL_PORT: 4173
+      PANEL_DATA_DIR: /var/lib/pconn
+      PANEL_JAVA_BIN: java
+    volumes:
+      - pconn_data:/var/lib/pconn
+    ports:
+      - "127.0.0.1:4173:4173"
+      - "25565:25565/tcp"
+    # One shared limit for all JVMs + the panel, not individual servers.
+    mem_limit: 10g
+volumes:
+  pconn_data:
