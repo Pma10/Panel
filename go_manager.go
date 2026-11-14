@@ -29,6 +29,7 @@ type serverConfig struct {
  AutoRestart bool `json:"autoRestart"`
  Template string `json:"template"`
  InstalledVersion string `json:"installedVersion,omitempty"`
+ RollbackVersion string `json:"rollbackVersion,omitempty"`
  Schedules []schedule `json:"schedules"`
 }
 type schedule struct {
@@ -163,6 +164,7 @@ func (m *manager) describe(s *managedServer)map[string]any{
   "jar":s.cfg.Jar,"version":version,"directory":m.dir(s.cfg.ID),"uptime":uptime,
   "eulaAccepted":s.cfg.EulaAccepted,"autoRestart":s.cfg.AutoRestart,
   "template":s.cfg.Template,"installedVersion":s.cfg.InstalledVersion,
+  "rollbackVersion":s.cfg.RollbackVersion,
  }
 }
 func (m *manager) list()[]map[string]any{
