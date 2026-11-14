@@ -78,7 +78,7 @@ type officialBuild struct{
   Checksums struct{SHA256 string `json:"sha256"`} `json:"checksums"`
  } `json:"downloads"`
 }
-func (m *manager)installTemplate(ctx context.Context,id,project,version string)(map[string]any,error){
+func (m *manager)installTemplate(ctx context.Context,id,project,version string,updating bool)(map[string]any,error){
  if !templateOK(project)||len(version)>48||!versionPattern.MatchString(version){
   return nil,apiError{400,"프로젝트 또는 버전이 올바르지 않습니다."}
  }
@@ -86,11 +86,21 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string)(
  s,err:=m.get(id)
  if err!=nil{m.mu.Unlock();return nil,err}
  if s.busy||s.process!=nil{m.mu.Unlock();return nil,apiError{409,"서버를 중지하고 설치하세요."}}
+ if updating && (s.cfg.Template!=project||s.cfg.InstalledVersion==""){
+  m.mu.Unlock()
+  return nil,apiError{409,"다른 종류의 서버 JAR은 자동 업데이트하지 않습니다. 수동으로 교체하세요."}
+ }
  s.busy=true
  m.mu.Unlock()
  defer func(){m.mu.Lock();s.busy=false;m.mu.Unlock()}()
  dest:=filepath.Join(m.dir(id),"server.jar")
- if _,err:=os.Lstat(dest);err==nil{return nil,apiError{409,"기존 server.jar을 백업하고 삭제해야 합니다."}}
+ info,jarErr:=os.Lstat(dest)
+ if updating {
+  if jarErr!=nil||!info.Mode().IsRegular(){return nil,apiError{409,"업데이트할 server.jar이 없습니다."}}
+ }else{
+  if jarErr==nil{return nil,apiError{409,"server.jar 파일이 이미 있습니다. 기존 파일은 덮어쓰지 않습니다."}}
+  if !os.IsNotExist(jarErr){return nil,jarErr}
+ }
  uri:=fmt.Sprintf("%s/v3/projects/%s/versions/%s/builds",paperAPI,project,url.PathEscape(version))
  ctx,cancel:=context.WithTimeout(ctx,3*time.Minute);defer cancel()
  raw,err:=officialGET(ctx,uri,1<<20);if err!=nil{return nil,err}
@@ -125,14 +135,50 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string)(
  if size!=jar.Size||hex.EncodeToString(hash.Sum(nil))!=strings.ToLower(jar.Checksums.SHA256){
   return nil,apiError{502,"다운로드한 JAR의 SHA-256 또는 크기가 일치하지 않습니다."}
  }
- if _,err:=os.Lstat(dest);err==nil{return nil,apiError{409,"설치 중 server.jar이 생성되었습니다."}}
- if err:=os.Rename(tmp,dest);err!=nil{return nil,err}
+ // This mutation happens only after the complete JAR is hash-verified.
+ // Keep one previous JAR on disk so an operator can roll back safely.
+ previous:=filepath.Join(m.dir(id),".panel-previous.jar")
+ if updating{
+  oldBackup:=previous+".older-"+makeID()
+  movedOld:=false
+  if _,statErr:=os.Lstat(previous);statErr==nil{
+   if err:=os.Rename(previous,oldBackup);err!=nil{return nil,err}
+   movedOld=true
+  }else if !os.IsNotExist(statErr){return nil,statErr}
+  if err:=os.Rename(dest,previous);err!=nil{
+   if movedOld{_ = os.Rename(oldBackup,previous)}
+   return nil,err
+  }
+  if err:=os.Rename(tmp,dest);err!=nil{
+   _ = os.Rename(previous,dest)
+   if movedOld{_ = os.Rename(oldBackup,previous)}
+   return nil,err
+  }
+  if movedOld{_ = os.Remove(oldBackup)}
+ }else{
+  if _,err:=os.Lstat(dest);err==nil{return nil,apiError{409,"설치 중 JAR이 생성되었습니다."}}
+  if err:=os.Rename(tmp,dest);err!=nil{return nil,err}
+ }
  m.mu.Lock()
+ oldCfg:=s.cfg
  s.cfg.Template=project
+ s.cfg.RollbackVersion=""
+ if updating{s.cfg.RollbackVersion=oldCfg.InstalledVersion}
  s.cfg.InstalledVersion=version
  err=m.saveLocked()
+ if err!=nil{
+  s.cfg=oldCfg
+  if updating{
+   failed:=dest+".failed-"+makeID()
+   if os.Rename(dest,failed)==nil{
+    _ = os.Rename(previous,dest)
+    _ = os.Remove(failed)
+   }
+  }else{_ = os.Remove(dest)}
+ }
  m.mu.Unlock()
  if err!=nil{return nil,err}
- m.log(id,"INFO","공식 "+project+" "+version+" 설치 완료")
- return map[string]any{"project":project,"version":version,"size":size,"sha256":hex.EncodeToString(hash.Sum(nil)),"buildId":selected.ID},nil
+ verb:="설치";if updating{verb="업데이트"}
+ m.log(id,"INFO","공식 "+project+" "+version+" "+verb+" 완료")
+ return map[string]any{"project":project,"version":version,"size":size,"sha256":hex.EncodeToString(hash.Sum(nil)),"buildId":selected.ID,"updated":updating},nil
 }
