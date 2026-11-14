@@ -22,7 +22,10 @@ func (m *manager) diagnostics()map[string]any{
   subscribers+=len(s.subscribers)
  }
  m.mu.Unlock()
+ var panelRSS any
+ if value,ok:=linuxRSS(os.Getpid());ok{panelRSS=value}
  return map[string]any{
+  "processRSSGb":panelRSS,
   "backend":"go",
   "serverCount":serverCount,
   "managedProcesses":running,
