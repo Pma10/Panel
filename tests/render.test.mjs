@@ -10,7 +10,7 @@ import {
 
 const source = (await readFile(new URL("../src/app.js",import.meta.url),"utf8"))
   .replace(/^import .+;$/gm,"")
-  .replace(/if \(apiEnabled\) loadFromApi\(\);\s*$/,"");
+  .replace(/if \(apiEnabled\) (?:loadFromApi|bootstrapAuth)\(\);\s*$/,"");
 
 function harness({live=false,request=async()=>null,stream=()=>()=>{}}={}) {
   const appRoot={innerHTML:""};
@@ -31,6 +31,7 @@ function harness({live=false,request=async()=>null,stream=()=>()=>{}}={}) {
     URL,Blob,Date,Intl,FormData
   };
   runInNewContext(source + "\nglobalThis.__panel = { state, render, loadFromApi, switchSelectedServer };",ctx);
+  if(live){ctx.__panel.state.authenticated=true;ctx.__panel.state.authLoading=false;ctx.__panel.state.loading=false;}
   return {appRoot,doc,location,...ctx.__panel};
 }
 
