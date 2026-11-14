@@ -175,7 +175,7 @@ function renderLogRows() {
 }
 function renderConsole() {
   const s = server();
-  return `<div class="console-page">${header("콘솔",${h(s?.name || "서버 없음")}+" · 로그 확인 및 명령어 실행")}
+  return `<div class="console-page">${header("콘솔",(s?.name || "서버 없음")+" · 로그 확인 및 명령어 실행")}
     <div class="toolbar console-toolbar">
       <label class="search-field">${icon("search")}<input class="field" id="log-search" placeholder="로그 검색" aria-label="로그 검색" value="${h(state.query)}"></label>
       <div class="filter-tabs" role="group" aria-label="로그 수준">
@@ -200,4 +200,151 @@ function renderConsole() {
         <button class="btn primary command-send" type="submit">전송</button></form>
     </section>
     <p class="console-help">${state.mode === "demo" ? "예시 모드: 입력한 명령은 실제 서버에 전송되지 않습니다." : "명령어는 현재 선택된 서버에 전송됩니다. 관리 권한이 있는 계정에서만 사용하세요."}</p></div>`;
+}
+
+function renderFiles() {
+  const viewingRoot = state.filePath === "/home/minecraft/server";
+  const files = viewingRoot ? DEMO_FILES : [];
+  const active = files.find((item) => item.name === state.selectedFile);
+  return `${header("파일","서버의 파일과 폴더를 안전하게 관리합니다",button(`${icon("upload","small")} 업로드`,"file-upload","primary"))}
+  <div class="toolbar"><div class="crumb-path"><button data-action="file-root">/home › minecraft › server</button>${!viewingRoot ? `<span>›</span><span>${h(state.filePath.split("/").pop())}</span>` : ""}</div>
+    <div class="toolbar-spacer"></div>${button("새 폴더","file-new-folder")}</div>
+  <div class="file-layout">
+    ${card("파일 목록",`<div class="table-scroll"><table class="data-table"><thead><tr><th>이름</th><th>종류</th><th class="numeric">크기</th><th class="numeric">수정</th></tr></thead>
+      <tbody>${files.length ? files.map((f) => `<tr class="file-row ${state.selectedFile===f.name?"active":""}" data-action="file-select" data-name="${h(f.name)}">
+      <td><span class="file-name">${icon(f.type==="folder"?"folder":"file")}<span>${h(f.name)}</span></span></td>
+      <td>${f.type==="folder"?"폴더":"파일"}</td><td class="numeric">${h(f.size)}</td><td class="numeric">${h(f.modified)}</td></tr>`).join("") : `<tr><td colspan="4"><div class="empty-state"><strong>이 폴더는 비어 있습니다</strong><p>${state.mode==="demo"?"예시 데이터에는 하위 폴더 내용이 포함되지 않습니다.":"파일 목록을 새로고침해 주세요."}</p></div></td></tr>`}</tbody></table></div>`)}
+    <aside class="card file-inspector"><h3>${active ? h(active.name) : "선택한 파일"}</h3>
+      ${active ? `<dl><dt>종류</dt><dd>${active.type==="folder"?"폴더":"파일"}</dd>
+        <dt>크기</dt><dd>${h(active.size)}</dd><dt>마지막 수정</dt><dd>${h(active.modified)}</dd></dl>
+        ${button(active.type==="folder"?"폴더 열기":"파일 보기","file-open","",`data-name="${h(active.name)}"`)}` :
+        `<p style="color:var(--secondary);line-height:1.7">목록에서 파일을 선택하면 세부 정보와 작업 메뉴가 표시됩니다.</p>`}
+    </aside></div>${demoNote()}`;
+}
+function renderBackups() {
+  const stats = [["복구 가능한 백업","8개","전체 백업 기록"],["전체 보관 크기","14.8 GB","백업 파일 합계"],["마지막 백업","3분 전","정상 완료"]];
+  return `${header("백업","백업을 생성하고 원하는 시점으로 서버를 복구합니다",button(`${icon("plus","small")} 새 백업`,"backup-create","primary"))}
+    <div class="grid-stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">${stats.map(([label,value,desc]) =>
+    `<div class="card stat-card"><span>${label}</span><strong>${value}</strong><small>${desc}</small></div>`).join("")}</div>
+    ${card("백업 기록",`<div class="info-list">${DEMO_BACKUPS.map((b) => `<div class="info-line">
+      <div><strong>${h(b.title)}</strong><p><span style="color:var(--success)">${h(b.status)}</span> · ${h(b.when)}</p></div>
+      <span class="right">${h(b.size)}</span>
+      ${button("복원","backup-restore","small",`data-id="${h(b.id)}"`)}</div>`).join("")}</div>`)}
+    <div class="notice">백업 복원은 현재 월드 데이터를 이전 시점으로 바꿀 수 있는 작업입니다. 실제 연결 시 작업 전 확인 절차가 필요합니다.</div>
+    ${demoNote()}`;
+}
+function inputRow(name,label,value,type="text") {
+  return `<div class="form-group"><label for="${h(name)}">${h(label)}</label>
+    <input class="field" id="${h(name)}" name="${h(name)}" type="${type}" value="${h(value)}" autocomplete="off"></div>`;
+}
+function renderStartup() {
+  const st = state.startup;
+  return `${header("시작 설정","실행 파일과 시작 옵션을 변경합니다")}
+  <form id="startup-form" class="stack">
+    <div class="card settings-card"><h2>프로세스 실행 설정</h2>
+      <div class="field-grid">
+        ${inputRow("executable","실행 프로그램",st.executable)}
+        ${inputRow("directory","작업 디렉터리",st.directory)}
+        ${inputRow("memory","메모리 제한 (MiB)",st.memory,"number")}
+        ${inputRow("timeout","종료 대기 시간 (초)",st.timeout,"number")}
+        ${inputRow("arguments","실행 인자",st.arguments)}
+      </div></div>
+    <div class="card settings-card"><h2>프로세스 정책</h2>
+      <div class="info-line"><div><strong>자동 재시작</strong><p>서버 프로세스가 비정상 종료된 경우 다시 시작합니다.</p></div>
+        <label class="checkbox-label"><input type="checkbox" name="autoRestart" ${st.autoRestart?"checked":""}>사용</label></div></div>
+    <div class="page-actions" style="justify-content:flex-end">${button("변경 사항 저장","startup-save","primary",`type="submit"`)}</div>
+  </form>${demoNote()}`;
+}
+function renderNetwork() {
+  const rows = [
+    ["25565","TCP","마인크래프트 기본 접속 포트","사용 중"],
+    ["8123","TCP","Dynmap 웹 접속 주소","사용 중"]
+  ];
+  return `${header("네트워크","서버에 할당된 포트를 관리하고 충돌을 확인합니다",button(`${icon("plus","small")} 포트 추가`,"network-add","primary"))}
+    ${card("포트 할당",`<div class="table-scroll"><table class="data-table">
+      <thead><tr><th>포트</th><th>프로토콜</th><th>설명</th><th>상태</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td><span class="status running">${r[3]}</span></td></tr>`).join("")}
+      </tbody></table></div>`)}
+    <div style="margin-top:22px">${card("충돌 검사",`<div class="info-list"><div class="info-line"><div><strong style="color:var(--success)">${icon("check","small")} 포트 충돌 없음</strong>
+      <p>등록된 서버 사이에서 포트가 중복되지 않는지 검사합니다.</p></div>
+      ${button("다시 검사","health-check")}</div></div>`)}</div>${demoNote()}`;
+}
+function renderSchedules() {
+  return `${header("예약 작업","백업과 유지보수 작업을 예약해 자동 실행합니다")}
+    <div class="two-col" style="grid-template-columns:minmax(0,1.5fr) minmax(285px,1fr)">
+      ${card("예약된 작업",`<div class="info-list">
+        ${state.schedules.map((s) => `<div class="info-line"><div><strong>${h(s.name)}</strong><p>${h(s.when)} · ${h(s.type)}</p></div>
+          <span class="status ${s.active?"running":"stopped"}">${s.active?"사용":"일시 중지"}</span></div>`).join("")}
+        </div>`)}
+      <form class="card settings-card" id="schedule-form"><h2>새 예약 작업</h2>
+        <div class="stack">
+          ${inputRow("schedule-name","작업 이름","야간 자동 백업")}
+          ${inputRow("schedule-cron","예약 실행식","0 3 * * *")}
+          <div class="form-group"><label for="schedule-type">작업 유형</label><select class="select" id="schedule-type" name="schedule-type">
+            <option>백업</option><option>재시작</option><option>명령 전송</option></select></div>
+          <div class="page-actions" style="justify-content:flex-end"><button type="submit" class="btn primary">예약 추가</button></div>
+        </div></form></div>${demoNote()}`;
+}
+function renderHealth() {
+  return `${header("상태 확인","프로세스와 자동 복구 정책을 확인합니다",button(`${icon("refresh","small")} 다시 검사`,"health-check"))}
+    <section class="card overview-head"><span class="server-glyph" style="background:var(--success-soft);color:var(--success)">${icon("check","large")}</span>
+      <div class="overview-title"><h2>모든 검사 정상</h2><p>마지막 검사 11초 전 · 상태 감시 사용 중 (예시)</p></div><span class="status running">정상</span></section>
+    <div class="grid-stats">
+      ${[["프로세스","실행 중","상태 정상"],["TCP 연결","정상","25565 포트 응답"],["연속 실패","0회","최근 오류 없음"],["자동 재시작","사용","충돌 발생 시 복구"]].map(([title,value,detail]) =>
+        `<div class="card stat-card"><span>${title}</span><strong>${value}</strong><small>${detail}</small></div>`).join("")}
+    </div>${card("감시 정책",`<div class="info-list">
+      ${[["상태 감시","서버 프로세스를 주기적으로 확인","사용 중"],["TCP 검사 포트","25565","정상"],["검사 간격","30초","자동"],["자동 재시작","비정상 종료 시 복구","사용 중"]].map(([label,detail,stateName]) =>
+        `<div class="info-line"><div><strong>${label}</strong><p>${detail}</p></div><span class="right">${stateName}</span></div>`).join("")}
+      </div>`)}${demoNote()}`;
+}
+function renderUsers() {
+  return `${header("사용자","사용자와 서버별 권한을 확인합니다",button(`${icon("plus","small")} 사용자 초대`,"user-invite","primary"))}
+    ${card("워크스페이스 사용자",`<div class="table-scroll"><table class="data-table"><thead><tr>
+      <th>사용자</th><th>권한</th><th>접근 범위</th></tr></thead><tbody>
+      ${DEMO_USERS.map((u) => `<tr><td><strong>${h(u.name)}</strong></td><td>${h(u.role)}</td><td>${h(u.scope)}</td></tr>`).join("")}
+      </tbody></table></div>`)}${demoNote()}`;
+}
+function renderAudit() {
+  return `${header("감사 로그","서버와 패널의 주요 작업 기록을 확인합니다",button(`${icon("download","small")} 내보내기`,"audit-export"))}
+    ${card("최근 감사 기록",`<div class="table-scroll"><table class="data-table"><thead><tr>
+      <th>시각</th><th>작업</th><th>사용자</th><th>대상</th></tr></thead><tbody>
+      ${DEMO_AUDIT.map((entry) => `<tr><td class="mono">${h(entry.time)}</td><td>${h(entry.action)}</td>
+        <td>${h(entry.actor)}</td><td>${h(entry.target)}</td></tr>`).join("")}
+      </tbody></table></div>`)}${demoNote()}`;
+}
+function renderSettings() {
+  const st = state.settings;
+  return `${header("설정","패널 표시 환경과 기본 설정을 관리합니다")}
+    <form id="settings-form" class="stack"><section class="card settings-card"><h2>기본 설정</h2>
+      <div class="field-grid">
+        ${inputRow("panelName","패널 이름",st.panelName)}
+        ${inputRow("timezone","시간대",st.timezone)}
+        ${inputRow("sessionHours","세션 유효 시간 (시간)",st.sessionHours,"number")}
+        ${inputRow("retention","백업 보관 기간 (일)",st.retention,"number")}
+      </div></section>
+      <section class="card settings-card"><h2>화면 표시</h2>
+        <div class="info-line"><div><strong>어두운 테마</strong><p>패널 전체에 차분한 다크 모드를 적용합니다.</p></div>
+          <button class="switch ${state.theme==="dark"?"on":""}" role="switch" type="button" aria-checked="${state.theme==="dark"}" aria-label="다크 모드" data-action="theme-toggle"></button></div>
+        <div class="info-line"><div><strong>감사 기록</strong><p>관리 작업을 추적하기 위한 기록입니다. 실제 기록은 서버에서 관리해야 합니다.</p></div>
+          <span class="right">백엔드 연결 필요</span></div>
+      </section><div class="page-actions" style="justify-content:flex-end"><button type="submit" class="btn primary">설정 저장</button></div>
+    </form>${demoNote()}`;
+}
+function renderPage() {
+  switch (state.route) {
+    case "dashboard": return renderDashboard();
+    case "servers": return renderServers();
+    case "overview": return renderOverview();
+    case "console": return renderConsole();
+    case "files": return renderFiles();
+    case "backups": return renderBackups();
+    case "startup": return renderStartup();
+    case "network": return renderNetwork();
+    case "schedules": return renderSchedules();
+    case "health": return renderHealth();
+    case "users": return renderUsers();
+    case "audit": return renderAudit();
+    case "settings": return renderSettings();
+    default: return renderDashboard();
+  }
 }
