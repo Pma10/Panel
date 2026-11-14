@@ -105,7 +105,7 @@ function renderChrome() {
         `<a href="#/${route}" class="${state.route === route ? "active" : ""}" aria-label="${title}">${icon(glyph)}<span>${title}</span></a>`).join("")}
     </nav>`;
 }
-const button = (label, action, kind = "", extra = "") => `<button class="btn ${kind}" data-action="${h(action)}" ${extra}>${label}</button>`;
+const button = (label, action, kind = "", extra = "") => `<button type="button" class="btn ${kind}" data-action="${h(action)}" ${extra}>${label}</button>`;
 const header = (title, description, actions = "") => `<div class="page-heading"><div><h1>${h(title)}</h1><p>${h(description)}</p></div>${actions ? `<div class="page-actions">${actions}</div>` : ""}</div>`;
 const card = (title, body, action = "") => `<section class="card"><div class="card-title"><h2>${h(title)}</h2>${action}</div>${body}</section>`;
 const demoNote = () => `<div class="demo-note">${icon("alert","small")} ${state.mode === "demo" ? "표시된 수치는 디자인 검토용 예시입니다. 실제 서버는 제어되지 않습니다." : "표시된 정보는 연결된 API를 기반으로 합니다."}</div>`;
@@ -345,6 +345,25 @@ function renderLiveBackups(){
       '<div class="empty-state"><strong>백업이 없습니다.</strong><p>새 백업을 생성해 보세요.</p></div>')+'</div>')+
     '<div class="notice">백업 생성과 복원은 서버가 중지된 상태에서만 가능합니다. 예약 백업은 자동으로 서버를 중지·재시작하므로 접속 중단이 발생할 수 있습니다.</div>';
 }
+function renderJarUpgrade(st){
+  if(!st || !["paper","folia"].includes(st.template))return "";
+  const stopped=server()?.status==="stopped";
+  const disabled=stopped?"":"disabled";
+  return card("공식 서버 JAR 업데이트",
+    '<p class="hint">현재 '+h(st.template)+' '+h(st.installedVersion||"버전 정보 없음")+
+    ' · 업데이트는 서버를 중지한 뒤 진행하며, 이전 JAR은 롤백용으로 보관됩니다.</p>'+
+    '<form id="jar-upgrade-form" class="stack" style="margin-top:18px">'+
+      '<div class="form-group"><label for="jar-upgrade-version">설치할 안정 버전</label>'+
+      '<select id="jar-upgrade-version" name="version" class="select" required '+disabled+'>'+
+        '<option value="">버전 목록을 불러오세요</option></select></div>'+
+      '<div class="page-actions">'+
+        button("공식 버전 확인","jar-versions-load","",disabled)+
+        '<button class="btn primary" type="submit" '+disabled+'>검증 후 JAR 교체</button>'+
+      '</div></form>'+
+    (st.rollbackVersion?'<div class="info-line" style="margin-top:16px"><span>이전 버전: '+h(st.rollbackVersion)+
+      '</span>'+button("이전 JAR로 롤백","jar-rollback","danger",disabled)+'</div>':"")+
+    '<p class="hint">Java 프로세스를 자동으로 재시작하지 않습니다. 월드 호환성을 확인하고 중요한 데이터는 별도 백업하세요.</p>');
+}
 function renderLiveStartup(){
   const st=state.startupLive;
   return header("시작 설정","Java 실행 메모리, 서버 JAR, EULA 동의 설정")+liveViewStatus()+
@@ -358,7 +377,8 @@ function renderLiveStartup(){
       '</div><label class="checkbox-label" style="margin-top:20px"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
       '<label class="checkbox-label" style="margin-top:12px"><input name="live-auto-restart" type="checkbox" '+(st.autoRestart?'checked':'')+'> 비정상 종료 시 자동 재시작 (최대 3회/10분)</label>'+
       '<p class="hint">선택된 JAR 파일은 서버 루트 폴더에 업로드되어 있어야 합니다. 설정 변경은 서버가 중지된 상태에서만 가능합니다.</p></section>'+
-      '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>');
+      '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>')+
+    renderJarUpgrade(st);
 }
 function renderLiveNetwork(){
   return header("네트워크","패널이 등록한 Minecraft TCP 포트")+liveViewStatus()+
@@ -1151,6 +1171,50 @@ document.addEventListener("click",async(event) => {
   if (action==="show-notifications"){setModal({kind:"notice",title:"알림",description:"현재 확인할 새 알림이 없습니다. 실제 서버 알림은 API 연동 이후 제공됩니다.",
     confirmLabel:"닫기",confirmAction:"modal-close"});return;}
   if (action==="api-retry"){await loadFromApi();return;}
+  if(action==="jar-versions-load"){
+    const template=state.startupLive?.template;
+    const select=$("#jar-upgrade-version");
+    if(!select||!["paper","folia"].includes(template))return;
+    select.disabled=true;
+    select.replaceChildren(new Option("공식 버전 목록 조회 중…",""));
+    try{
+      const id=state.selectedId;
+      const response=await apiRequest("/templates/"+template+"/versions");
+      if(id!==state.selectedId || state.route!=="startup")return;
+      const versions=Array.isArray(response.versions)?response.versions:[];
+      select.replaceChildren(new Option("버전을 선택하세요",""),...versions.map(v=>new Option(v,v)));
+      select.disabled=versions.length===0;
+      if(!versions.length)toast("현재 제공되는 안정 빌드 버전이 없습니다.");
+    }catch(e){select.replaceChildren(new Option("버전 조회 실패",""));toast(e.message);}
+    return;
+  }
+  if(action==="jar-rollback"){
+    const ver=state.startupLive?.rollbackVersion;
+    if(!ver)return toast("롤백할 버전이 없습니다.");
+    setModal({kind:"confirm",title:"서버 JAR을 이전 버전으로 되돌릴까요?",
+      description:"서버가 중지되어 있어야 합니다. 이전 버전 "+ver+"으로 되돌리며 월드 데이터는 변경하지 않습니다.",
+      confirmAction:"jar-rollback-run",confirmLabel:"JAR 롤백",danger:true});
+    return;
+  }
+  if(action==="jar-rollback-run" || action==="jar-upgrade-run"){
+    const modal=state.modal;
+    const id=state.selectedId;
+    setModal(null);
+    try{
+      if(action==="jar-upgrade-run"){
+        toast("공식 JAR을 다운로드하여 SHA-256을 검증하고 있습니다.");
+        await apiRequest("/servers/"+encodeURIComponent(id)+"/install/upgrade",{
+          method:"POST",body:{template:modal.template,version:modal.version},timeoutMs:200000
+        });
+        toast("JAR 업데이트 완료. 서버 호환성 확인 후 시작하세요.");
+      }else{
+        await apiRequest("/servers/"+encodeURIComponent(id)+"/install/rollback",{method:"POST"});
+        toast("이전 JAR로 롤백했습니다.");
+      }
+      await refreshRouteData();await loadFromApi();
+    }catch(e){toast(e.message);}
+    return;
+  }
   if (action==="health-check"){
     if(state.mode==="live")await refreshRouteData();else toast("예시 데이터만 표시 중입니다.");return;
   }
@@ -1187,8 +1251,17 @@ document.addEventListener("submit",async(event) => {
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
   }
-  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form"].includes(form.id))return;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","jar-upgrade-form"].includes(form.id))return;
   event.preventDefault();
+  if(form.id==="jar-upgrade-form"){
+    const template=state.startupLive?.template;
+    const version=String(new FormData(form).get("version")||"");
+    if(!["paper","folia"].includes(template) || !version)return toast("업데이트 버전을 선택하세요.");
+    setModal({kind:"confirm",title:"공식 서버 JAR을 업데이트할까요?",
+      description:template+" "+version+" 안정 빌드를 다운로드하고 SHA-256 검증 후 기존 JAR을 교체합니다. 서버 중지가 필요하며 이전 JAR은 롤백용으로 보관합니다.",
+      template,version,confirmLabel:"검증 후 업데이트",confirmAction:"jar-upgrade-run"});
+    return;
+  }
   if(form.id==="console-form"){await sendCommand();return;}
   if(form.id==="file-editor-form"){
     const path=state.modal?.path;if(!path)return;
