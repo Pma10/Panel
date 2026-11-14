@@ -15,7 +15,7 @@ import (
 
 const maxUpload = 256 << 20
 func safeRelativePath(value string)(string,error){
- if len(value)>1024||strings.ContainsAny(value,"\\\x00"){return "",apiError{400,"파일 경로가 올바르지 않습니다."}}
+ if len(value)>1024||strings.ContainsAny(value,"\\:\x00"){return "",apiError{400,"파일 경로가 올바르지 않습니다."}}
  if value==""||value=="."{return "",nil}
  if filepath.IsAbs(value){return "",apiError{403,"절대 경로는 허용되지 않습니다."}}
  parts:=strings.Split(value,"/")
