@@ -199,6 +199,7 @@ func (m *manager) create(c serverConfig)(map[string]any,error){
  if len(m.servers)>=100{return nil,apiError{409,"서버 수 제한을 초과했습니다."}}
  for _,s:=range m.servers{if s.cfg.Port==c.Port{return nil,apiError{409,"중복 포트입니다."}}}
  c.ID=makeID();c.Jar="server.jar";c.Schedules=[]schedule{}
+ c.InstalledVersion="";c.RollbackVersion="";c.AutoRestart=false
  dir:=m.dir(c.ID)
  if err:=os.Mkdir(dir,0700);err!=nil{return nil,err}
  success:=false
