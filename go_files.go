@@ -114,6 +114,25 @@ func (m *manager) uploadFile(id,rel string,r io.Reader)(int64,error){
   if oldBackup!=""{_ = os.Rename(oldBackup,target)}
   return 0,err
  }
+ if rel=="server.jar"{
+  // A manually uploaded JAR is no longer an officially verified Paper/Folia
+  // artifact. Invalidate metadata so the one-click update UI cannot mistake
+  // it for the old downloaded binary.
+  m.mu.Lock()
+  state:=m.servers[id]
+  previousCfg:=state.cfg
+  state.cfg.Template="manual"
+  state.cfg.InstalledVersion=""
+  state.cfg.RollbackVersion=""
+  persistErr:=m.saveLocked()
+  if persistErr!=nil{state.cfg=previousCfg}
+  m.mu.Unlock()
+  if persistErr!=nil{
+   _ = os.Remove(target)
+   if oldBackup!=""{_ = os.Rename(oldBackup,target)}
+   return 0,persistErr
+  }
+ }
  if oldBackup!=""{_ = os.Remove(oldBackup)}
  return total,nil
 }
