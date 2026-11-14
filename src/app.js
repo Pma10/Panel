@@ -1197,7 +1197,7 @@ document.addEventListener("submit",async(event) => {
         await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/startup",{
           method:"PATCH",body:{name:String(d.get("live-name")||""),
             memoryMb:Number(d.get("live-memory")),jar:String(d.get("live-jar")||"server.jar"),
-            eulaAccepted:d.has("live-eula")}
+            eulaAccepted:d.has("live-eula"),autoRestart:d.has("live-auto-restart")}
         });
         toast("시작 설정을 저장했습니다.");await refreshRouteData();await loadFromApi();
       }catch(e){toast(e.message);}
