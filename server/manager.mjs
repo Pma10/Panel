@@ -26,6 +26,7 @@ export class MinecraftManager {
     this.configPath=join(this.root,"config.json");
     this.javaBin=javaBin;
     this.servers=new Map();this.active=new Map();this.logs=new Map();
+    this.saveQueue=Promise.resolve();
     this.events=new EventEmitter();this.events.setMaxListeners(256);
     this.busy=new Set();this.creating=false;this.stopped=false;this.scheduleTimer=null;
     this.statuses=new Map();this.statusPollTimer=null;this.polling=false;
@@ -52,9 +53,15 @@ export class MinecraftManager {
   }
   dir(id){this.get(id);return join(this.serversDir,id);}
   async persist() {
-    const tmp=this.configPath+"."+makeId()+".tmp";
-    await writeFile(tmp,JSON.stringify({servers:[...this.servers.values()]},null,2),{mode:0o600});
-    await rename(tmp,this.configPath);
+    const snapshot=JSON.stringify({servers:[...this.servers.values()]},null,2);
+    this.saveQueue=this.saveQueue.catch(()=>{}).then(async()=>{
+      const tmp=this.configPath+"."+makeId()+".tmp";
+      try{
+        await writeFile(tmp,snapshot,{mode:0o600});
+        await rename(tmp,this.configPath);
+      }catch(error){await rm(tmp,{force:true});throw error;}
+    });
+    return this.saveQueue;
   }
   pushLog(id,level,message) {
     if(!this.logs.has(id))this.logs.set(id,[]);
