@@ -231,6 +231,12 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   item,err:=a.manager.backup(r.Context(),id);if err!=nil{return err}
   a.audit.append("POST /backups",id);jsonReply(w,201,item);return nil
  }
+ if len(parts)==4 && parts[2]=="backups"{
+  if err:=assertMethod(r,"DELETE");err!=nil{return err}
+  if err:=a.manager.deleteBackup(id,parts[3]);err!=nil{return err}
+  a.audit.append("DELETE /backups",id)
+  jsonReply(w,200,map[string]bool{"deleted":true});return nil
+ }
  if len(parts)==5 && parts[2]=="backups" && parts[4]=="restore"{
   if err:=assertMethod(r,"POST");err!=nil{return err}
   result,err:=a.manager.restore(r.Context(),id,parts[3]);if err!=nil{return err}
