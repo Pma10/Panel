@@ -98,6 +98,6 @@ export function createStaticServer(root = process.cwd()) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const port = Number(process.env.PORT || 4173);
   createStaticServer().listen(port, "127.0.0.1", () => {
-    process.stdout.write("피컨 미리보기: http://127.0.0.1:" + port + "\n");
+    process.stdout.write("Panel 미리보기: http://127.0.0.1:" + port + "\n");
   });
 }
