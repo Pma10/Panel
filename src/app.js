@@ -293,7 +293,8 @@ function renderFiles() {
 }
 
 async function refreshRouteData(){
-  if(state.mode!=="live" || !state.authenticated || !state.selectedId)return;
+  if(state.mode!=="live" || !state.authenticated)return;
+  if(!state.selectedId && state.route!=="audit")return;
   if(state.route==="files"){await loadFiles();return;}
   const route=state.route;
   const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit"};
@@ -709,7 +710,7 @@ function navigate(route) {
   state.mobileMenu = false;
   state.modal = null;
   if (location.hash !== "#/" + route) location.hash = "#/" + route;
-  else { state.route = route; render(); }
+  else { state.route = route; render();refreshRouteData(); }
 }
 function downloadText(filename, text) {
   const blob = new Blob([text],{ type:"text/plain;charset=utf-8" });
@@ -822,6 +823,8 @@ async function switchSelectedServer(id,destination="overview") {
     if (logClose) { logClose(); logClose = null; }
     state.selectedId = id;
     state.logs = state.mode === "demo" ? replaceLogHistory(DEMO_LOGS) : [];
+    state.filePath = state.mode==="live"?"":"/home/minecraft/server";
+    state.fileEntries=[];state.selectedFile="";state.backups=[];state.startupLive=null;state.network=[];state.health=null;state.schedules=[];
     state.logError = "";
     state.logLoading = state.mode === "live";
     cancelLogUpdate();
@@ -854,8 +857,8 @@ async function loadFromApi() {
     const items = Array.isArray(value) ? value : value?.servers;
     if (!Array.isArray(items)) throw new Error("서버 응답 형식이 올바르지 않습니다.");
     state.servers = items.filter((it) => it && typeof it.id === "string" && typeof it.name === "string")
-      .map((it) => ({...it,status:it.status||"unknown",players:Number(it.players)||0,maxPlayers:Number(it.maxPlayers)||0,
-        memoryGb:Number(it.memoryGb)||0,memoryLimitGb:Number(it.memoryLimitGb)||1,cpu:Number(it.cpu)||0,
+      .map((it) => ({...it,status:it.status||"unknown",players:it.players==null?null:Number(it.players),maxPlayers:it.maxPlayers==null?null:Number(it.maxPlayers),
+        memoryGb:it.memoryGb==null?null:(Number(it.memoryGb)||0),memoryLimitGb:Number(it.memoryLimitGb)||Number(it.memoryMb||2048)/1024,cpu:it.cpu==null?null:Number(it.cpu),
         directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—",
         tps:it.tps==null?null:(Number.isFinite(Number(it.tps))?Number(it.tps):null),
         mspt:it.mspt==null?null:(Number.isFinite(Number(it.mspt))?Number(it.mspt):null)}));
@@ -872,6 +875,7 @@ async function loadFromApi() {
       state.logLoading = false;
       render();
       connectLogStream();
+      refreshRouteData();
     }
   }
 }
@@ -897,7 +901,7 @@ function connectLogStream() {
 }
 window.addEventListener("hashchange", () => {
   state.route=routeFromHash(location.hash);state.mobileMenu=false;state.modal=null;
-  cancelLogUpdate();render();connectLogStream(); window.scrollTo({top:0,behavior:"auto"});
+  cancelLogUpdate();render();connectLogStream();refreshRouteData(); window.scrollTo({top:0,behavior:"auto"});
 });
 document.addEventListener("keydown",(event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==="k") {
