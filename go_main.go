@@ -80,6 +80,7 @@ func run() error {
  }
  listener, err := net.Listen("tcp", addr)
  if err != nil { return err }
+ go manager.resumePending()
  log.Printf("피컨 Go 패널: %s (관리 서버: %s)", origin, root)
  done := make(chan os.Signal, 1)
  signal.Notify(done, os.Interrupt, syscall.SIGTERM)
