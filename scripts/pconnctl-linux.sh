@@ -14,10 +14,17 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   printf 'Usage: sudo bash scripts/pconnctl-linux.sh {install|update} vX.Y.Z\n'
+  printf '       sudo bash scripts/pconnctl-linux.sh {install-local|update-local} /path/to/pconn\n'
   printf '       sudo bash scripts/pconnctl-linux.sh {rollback|status}\n'
   exit 2
 }
-case "$action" in install|update|rollback|status) ;; *) usage ;; esac
+local_binary=""
+case "$action" in
+  install-local) action=install; local_binary="$tag" ;;
+  update-local) action=update; local_binary="$tag" ;;
+  install|update|rollback|status) ;;
+  *) usage ;;
+esac
 if [[ "$action" == status ]]; then
   systemctl --no-pager status pconn || true
   [[ -x "$bin" ]] && "$bin" --version || true
@@ -56,29 +63,36 @@ if [[ "$action" == rollback ]]; then
   exit 0
 fi
 
-[[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]] || usage
-for command in curl sha256sum tar install; do
-  command -v "$command" >/dev/null || { echo "Missing: $command" >&2; exit 1; }
-done
-case "$(uname -m)" in
-  x86_64) arch=amd64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  *) echo "Only Linux amd64/arm64 are supported by this installer." >&2; exit 1 ;;
-esac
-asset="pconn-linux-$arch.tar.gz"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-url="https://github.com/Pma10/Panel/releases/download/$tag"
-echo "Downloading signed-transport release $tag for linux/$arch..."
-curl -fL --retry 3 --proto '=https' --tlsv1.2 -o "$tmp/$asset" "$url/$asset"
-curl -fL --retry 3 --proto '=https' --tlsv1.2 -o "$tmp/SHA256SUMS" "$url/SHA256SUMS"
-grep -E "^[0-9a-f]{64}  ${asset}$" "$tmp/SHA256SUMS" > "$tmp/checksums"
-[[ $(wc -l < "$tmp/checksums") -eq 1 ]] || { echo "Release checksum is missing or duplicated." >&2; exit 1; }
-(cd "$tmp" && sha256sum --check checksums)
-[[ "$(tar -tzf "$tmp/$asset")" == pconn ]] || { echo "Release archive has unexpected contents." >&2; exit 1; }
-tar -xzf "$tmp/$asset" -C "$tmp" pconn
-chmod 0755 "$tmp/pconn"
-"$tmp/pconn" --version | grep -Fq "pconn $tag " || { echo "Binary version does not match release." >&2; exit 1; }
+if [[ -n "$local_binary" ]]; then
+  [[ -f "$local_binary" && ! -L "$local_binary" ]] || { echo "Local Go binary does not exist or is a symlink." >&2; exit 1; }
+  cp -- "$local_binary" "$tmp/pconn"
+  chmod 0755 "$tmp/pconn"
+  "$tmp/pconn" --version | grep -Fq "pconn " || { echo "Not a pconn Go binary." >&2; exit 1; }
+else
+  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]] || usage
+  for command in curl sha256sum tar install; do
+    command -v "$command" >/dev/null || { echo "Missing: $command" >&2; exit 1; }
+  done
+  case "$(uname -m)" in
+    x86_64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "Only Linux amd64/arm64 are supported." >&2; exit 1 ;;
+  esac
+  asset="pconn-linux-$arch.tar.gz"
+  url="https://github.com/Pma10/Panel/releases/download/$tag"
+  echo "Downloading release $tag for linux/$arch..."
+  curl -fL --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$tmp/$asset" "$url/$asset"
+  curl -fL --retry 3 --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$tmp/SHA256SUMS" "$url/SHA256SUMS"
+  grep -E "^[0-9a-f]{64}  ${asset}$" "$tmp/SHA256SUMS" > "$tmp/checksums"
+  [[ $(wc -l < "$tmp/checksums") -eq 1 ]] || { echo "Release checksum is missing or duplicated." >&2; exit 1; }
+  (cd "$tmp" && sha256sum --check checksums)
+  [[ "$(tar -tzf "$tmp/$asset")" == pconn ]] || { echo "Release archive has unexpected contents." >&2; exit 1; }
+  tar -xzf "$tmp/$asset" -C "$tmp" pconn
+  chmod 0755 "$tmp/pconn"
+  "$tmp/pconn" --version | grep -Fq "pconn $tag " || { echo "Binary version does not match release." >&2; exit 1; }
+fi
 
 if [[ "$action" == install ]]; then
   [[ ! -e "$bin" ]] || { echo "Already installed; use 'update' instead." >&2; exit 1; }
