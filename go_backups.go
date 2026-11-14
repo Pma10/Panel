@@ -90,6 +90,33 @@ func (m *manager) backups(id string)([]backupMeta,error){
  sort.Slice(list,func(i,j int)bool{return list[i].CreatedAt>list[j].CreatedAt})
  return list,nil
 }
+func (m *manager)deleteBackup(id,backupID string)error{
+ if len(backupID)!=16||!isHex(backupID){return apiError{400,"백업 ID가 올바르지 않습니다."}}
+ m.mu.Lock()
+ state,err:=m.get(id)
+ if err!=nil{m.mu.Unlock();return err}
+ if state.busy{m.mu.Unlock();return apiError{409,"다른 백업 또는 복원 작업이 진행 중입니다."}}
+ state.busy=true
+ m.mu.Unlock()
+ defer func(){m.mu.Lock();state.busy=false;m.mu.Unlock()}()
+ folder:=filepath.Join(m.root,"backups",id,backupID)
+ data,err:=os.ReadFile(filepath.Join(folder,"meta.json"))
+ if errors.Is(err,os.ErrNotExist){return apiError{404,"백업이 존재하지 않습니다."}}
+ if err!=nil{return err}
+ var metadata backupMeta
+ if err:=json.Unmarshal(data,&metadata);err!=nil{return apiError{409,"백업 메타데이터가 손상되었습니다."}}
+ if metadata.ID!=backupID||metadata.ServerID!=id{
+  return apiError{409,"백업 메타데이터가 요청한 서버와 일치하지 않습니다."}
+ }
+ info,err:=os.Lstat(folder)
+ if err!=nil{return err}
+ if !info.IsDir()||info.Mode()&os.ModeSymlink!=0{
+  return apiError{403,"백업 경로가 안전하지 않습니다."}
+ }
+ if err:=os.RemoveAll(folder);err!=nil{return err}
+ m.log(id,"WARN","백업 삭제: "+backupID)
+ return nil
+}
 func (m *manager)restore(ctx context.Context,id,backupID string)(map[string]any,error){
  if len(backupID)!=16||!isHex(backupID){return nil,apiError{400,"백업 ID가 올바르지 않습니다."}}
  _,release,err:=m.beginBackup(id);if err!=nil{return nil,err}
