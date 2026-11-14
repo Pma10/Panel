@@ -28,6 +28,12 @@ func (m *manager) filePath(id,path string,allowMissing bool)(string,error){
  m.mu.Lock();_,err:=m.get(id);m.mu.Unlock();if err!=nil{return "",err}
  relative,err:=safeRelativePath(path);if err!=nil{return "",err}
  root:=m.dir(id)
+ // Do not follow a replaced or symlinked managed-server root.
+ rootInfo,err:=os.Lstat(root)
+ if err!=nil{return "",err}
+ if !rootInfo.IsDir()||rootInfo.Mode()&os.ModeSymlink!=0{
+  return "",apiError{403,"서버 루트 폴더가 변경되었거나 심볼릭 링크입니다."}
+ }
  current:=root
  if relative==""{return root,nil}
  parts:=strings.Split(relative,string(filepath.Separator))
