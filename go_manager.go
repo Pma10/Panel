@@ -242,6 +242,10 @@ func (m *manager) start(id string)(map[string]any,error){
  if !s.cfg.EulaAccepted{m.mu.Unlock();return nil,apiError{409,"Minecraft EULA 동의가 필요합니다."}}
  if !validJar(s.cfg.Jar){m.mu.Unlock();return nil,apiError{400,"JAR 이름이 올바르지 않습니다."}}
  folder:=m.dir(id)
+ rootInfo,rootErr:=os.Lstat(folder)
+ if rootErr!=nil||!rootInfo.IsDir()||rootInfo.Mode()&os.ModeSymlink!=0{
+  m.mu.Unlock();return nil,apiError{409,"관리 서버 폴더가 누락됐거나 안전하지 않습니다."}
+ }
  if orphanJavaRunning(folder) {m.mu.Unlock();return nil,apiError{409,"이전 패널에서 실행한 Java가 아직 살아 있습니다. 먼저 기존 프로세스를 안전하게 종료하세요."}}
  portAddr:=net.JoinHostPort("127.0.0.1",strconv.Itoa(s.cfg.Port))
  probe,portErr:=net.Listen("tcp",portAddr)
