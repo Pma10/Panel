@@ -68,7 +68,7 @@ const routeTitle = () => routeMap[state.route]?.label || "대시보드";
 const selectedName = () => server()?.name || "서버 없음";
 const statusText = (status) => ({
   running:"실행 중",stopped:"중지됨",starting:"시작 중",
-  stopping:"종료 중",restarting:"재시작 대기"
+  stopping:"종료 중",restarting:"재시작 대기",unmanaged:"기존 Java 감지"
 })[status] || "상태 알 수 없음";
 const badge = (status) => `<span class="status ${status === "running" ? "running" : status === "stopped" ? "stopped" : "warning"}"><i class="indicator"></i>${statusText(status)}</span>`;
 const fmtPlayers = (s) => s.maxPlayers ? `${s.players ?? 0} / ${s.maxPlayers}` : "—";
@@ -142,7 +142,8 @@ function renderServers() {
       <select id="server-status" class="select" aria-label="서버 상태">
         <option value="all" ${state.serverStatus === "all" ? "selected":""}>전체 상태</option>
         <option value="running" ${state.serverStatus === "running" ? "selected":""}>실행 중</option>
-        <option value="stopped" ${state.serverStatus === "stopped" ? "selected":""}>중지됨</option></select>
+        <option value="stopped" ${state.serverStatus === "stopped" ? "selected":""}>중지됨</option>
+        <option value="unmanaged" ${state.serverStatus === "unmanaged" ? "selected":""}>기존 Java 감지</option></select>
       <div class="toolbar-spacer"></div><span class="demo-ribbon">${state.servers.length}대 등록</span></div>
     ${card("서버 목록",`<div class="table-scroll"><table class="data-table">
       <thead><tr><th>서버 이름</th><th>상태</th><th class="numeric">접속 인원</th><th class="numeric">메모리</th><th>관리</th></tr></thead>
@@ -152,10 +153,12 @@ function renderServers() {
 function renderOverview() {
   const s = server();
   if (!s) return emptyServer();
-  const action = ["stopped","restarting"].includes(s.status) ?
-    button(`${icon("power","small")} 서버 시작`,"power-confirm","primary",`data-power="start"`) :
-    `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
-    ${button(`${icon("power","small")} 서버 중지`,"power-confirm","danger",`data-power="stop"`)}`;
+  const action = s.status==="unmanaged" ?
+    '<div class="notice">이전 패널이 실행한 Java 프로세스가 남아 있습니다. PID와 서버 상태를 확인하고 기존 프로세스를 안전하게 종료한 후 패널에서 다시 시작하세요.</div>' :
+    ["stopped","restarting"].includes(s.status) ?
+      button(`${icon("power","small")} 서버 시작`,"power-confirm","primary",`data-power="start"`) :
+      `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
+      ${button(`${icon("power","small")} 서버 중지`,"power-confirm","danger",`data-power="stop"`)}`;
   const metrics = [
     ["접속 인원",fmtPlayers(s),"현재 플레이어"],
     ["TPS",s.tps == null ? "—" : s.tps.toFixed(1),"틱 처리율"],
