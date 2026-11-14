@@ -74,6 +74,7 @@ type manager struct{
  stopScheduler chan struct{}
  crashHistory map[string][]time.Time
  pendingRestarts map[string]*time.Timer
+ jobQueue chan scheduledJob
 }
 func makeID()string{
  b:=make([]byte,8)
@@ -83,7 +84,7 @@ func makeID()string{
 func newManager(root,javaBin string)(*manager,error){
  if err:=os.MkdirAll(filepath.Join(root,"servers"),0700);err!=nil{return nil,err}
  if err:=os.MkdirAll(filepath.Join(root,"backups"),0700);err!=nil{return nil,err}
- m:=&manager{root:root,javaBin:javaBin,servers:map[string]*managedServer{},stopScheduler:make(chan struct{}),crashHistory:map[string][]time.Time{},pendingRestarts:map[string]*time.Timer{}}
+ m:=&manager{root:root,javaBin:javaBin,servers:map[string]*managedServer{},stopScheduler:make(chan struct{}),crashHistory:map[string][]time.Time{},pendingRestarts:map[string]*time.Timer{},jobQueue:make(chan scheduledJob,128)}
  buf,err:=os.ReadFile(filepath.Join(root,"config.json"))
  if err!=nil && !errors.Is(err,os.ErrNotExist){return nil,err}
  if len(buf)>0{
@@ -98,6 +99,8 @@ func newManager(root,javaBin string)(*manager,error){
  }
  go m.scheduleLoop()
  go m.statusLoop()
+ go m.scheduledWorker()
+ go m.scheduledWorker()
  return m,nil
 }
 func (m *manager)loadPreviousLog(id string){
