@@ -352,6 +352,7 @@ function renderLiveStartup(){
       inputRow("live-jar","실행 JAR 이름",st.jar)+
       '<div class="form-group"><label for="live-port">접속 포트</label><input id="live-port" class="field" type="number" value="'+h(st.port)+'" readonly></div>'+
       '</div><label class="checkbox-label" style="margin-top:20px"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
+      '<label class="checkbox-label" style="margin-top:12px"><input name="live-auto-restart" type="checkbox" '+(st.autoRestart?'checked':'')+'> 비정상 종료 시 자동 재시작 (최대 3회/10분)</label>'+
       '<p class="hint">선택된 JAR 파일은 서버 루트 폴더에 업로드되어 있어야 합니다. 설정 변경은 서버가 중지된 상태에서만 가능합니다.</p></section>'+
       '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>');
 }
