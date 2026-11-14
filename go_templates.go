@@ -52,8 +52,7 @@ func templateVersions(ctx context.Context,project string)([]string,error){
  seen:=map[string]bool{}
  for _,list:=range result.Versions{
   for _,v:=range list{
-   if len(versions)>=120{break}
-   if !seen[v]&&versionPattern.MatchString(v){seen[v]=true;versions=append(versions,v)}
+   if !seen[v]&&len(versions)<4096&&len(v)<=48&&versionPattern.MatchString(v){seen[v]=true;versions=append(versions,v)}
   }
  }
  sort.Slice(versions,func(i,j int)bool{
@@ -67,6 +66,7 @@ func templateVersions(ctx context.Context,project string)([]string,error){
   }
   return versions[i]>versions[j]
  })
+ if len(versions)>120{versions=versions[:120]}
  return versions,nil
 }
 type officialBuild struct{
@@ -107,7 +107,10 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
  var builds []officialBuild
  if json.Unmarshal(raw,&builds)!=nil{return nil,apiError{502,"빌드 목록을 확인할 수 없습니다."}}
  var selected *officialBuild
- for i:=range builds{if builds[i].Channel=="STABLE"{selected=&builds[i];break}}
+ for i:=range builds{
+  if builds[i].Channel=="STABLE" && builds[i].Downloads["server:default"].Size>0 &&
+    (selected==nil || builds[i].ID>selected.ID){selected=&builds[i]}
+ }
  if selected==nil{return nil,apiError{404,"선택한 버전에 안정 빌드가 없습니다."}}
  jar,ok:=selected.Downloads["server:default"]
  if !ok || jar.Size<1024 || jar.Size>256<<20 || !shaPattern.MatchString(strings.ToLower(jar.Checksums.SHA256)){
