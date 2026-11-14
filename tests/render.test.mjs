@@ -10,7 +10,7 @@ import {
 
 const source = (await readFile(new URL("../src/app.js",import.meta.url),"utf8"))
   .replace(/^import .+;$/gm,"")
-  .replace(/render\(\);\s*if \(apiEnabled\) loadFromApi\(\);\s*$/,"render();");
+  .replace(/if \(apiEnabled\) loadFromApi\(\);\s*$/,"");
 
 function harness({live=false,request=async()=>null,stream=()=>()=>{}}={}) {
   const appRoot={innerHTML:""};
