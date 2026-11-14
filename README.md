@@ -71,3 +71,38 @@ go build -o pconn .
 Java `-Xmx`는 힙 크기만 제한합니다. Pterodactyl Wings처럼 Docker 및 cgroup으로 서버 자원과 파일 시스템을 실제로 격리하는 기능과 혼동하지 마세요.
 
 디자인 참고: [Figma 대시보드](https://www.figma.com/design/wJgjNvtFDPTscqKWzV6J5h?node-id=63-529), [Figma 콘솔](https://www.figma.com/design/wJgjNvtFDPTscqKWzV6J5h?node-id=63-949). [Unslop](https://github.com/heydamir/unslop) by Damir Sokolovsky(CC BY 4.0), Paperlogy 웹폰트를 사용합니다.
+
+## 실제 운영 전 검증
+
+Linux에서 Go 1.23+, Java, gcc(CGO/race), curl, Python 3를 설치한 다음:
+
+```bash
+bash scripts/verify-go.sh
+```
+
+이 검사는 Go 코드를 정리하고 `go vet`, `go test -race`, 최적화 빌드, 실제 로컬 HTTP 구동, 관리자 미인증 API의 HTTP 401, 내부 파일 접근의 HTTP 404를 차례로 확인합니다. 실행 중인 Minecraft 서버 파일에는 접근하지 않고 임시 데이터 디렉터리에서 실행합니다.
+
+**이 저장소의 GitHub Actions는 현재 실행 단계가 나타나지 않고 실패하고 있어, CI가 정상 실행됐다고 주장할 수 없습니다.** 실제 배포 전에 위 검사를 직접 통과시키고 별도 테스트 세계에서 Java 시작·종료·복원까지 검증해야 합니다.
+
+## Linux / Docker 배포
+
+서버 직접 설치는 [Go 운영 가이드](docs/go-backend.md)와 `deploy/pconn.service`를 참고하세요.
+
+Docker에서는 `.env.example`을 `.env`로 복사한 뒤 강력한 관리자 비밀번호와 **실제로 적용된 HTTPS 관리 패널 주소**를 지정합니다.
+
+```bash
+docker compose build
+docker compose up -d
+docker compose logs -f pconn
+```
+
+기본 Compose 구성은 관리자 포트 4173을 **호스트 127.0.0.1에만 바인딩**하고, Minecraft 접속 포트 25565만 외부로 엽니다. HTTPS 리버스 프록시와 도메인 설정이 별도로 필요합니다. 서버를 추가하여 다른 게임 포트를 사용한다면 Compose 포트 매핑도 직접 추가해야 합니다.
+
+**Docker의 10GiB 제한은 패널과 모든 JVM의 합계입니다.** 서버별 격리가 아니며, 각 서버의 Java 힙 설정을 합산했을 때 컨테이너 상한을 넘지 않도록 주의하세요.
+
+### 장애 복구와 데이터 보존
+
+- Linux의 패널 데이터 폴더는 단일 실행 잠금을 사용합니다. 서버가 이미 존재하는 경우 두 번째 패널 실행을 거부합니다.
+- 이전 Java PID가 살아 있는 것으로 감지되면 UI에서 경고하며 중복 시작을 차단합니다. **기존 프로세스가 정상 종료됐는지 확인한 뒤** 다시 시작하세요.
+- Windows 등 비-Linux의 데이터 잠금 마커가 비정상 종료 후 남았다면, 기존 패널이 종료됐는지 반드시 확인한 뒤 잠금 파일을 수동으로 정리해야 합니다.
+- 관리자 패널 데이터 폴더 밖에도 중요한 월드 백업을 보관하세요. 실행 중인 월드의 무중단 백업은 아직 지원하지 않습니다.
