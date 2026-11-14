@@ -148,7 +148,9 @@ function renderServers() {
 function renderOverview() {
   const s = server();
   if (!s) return emptyServer();
-  const action = `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
+  const action = s.status === "stopped" ?
+    button(`${icon("power","small")} 서버 시작`,"power-confirm","primary",`data-power="start"`) :
+    `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
     ${button(`${icon("power","small")} 서버 중지`,"power-confirm","danger",`data-power="stop"`)}`;
   const metrics = [
     ["접속 인원",fmtPlayers(s),"현재 플레이어"],
@@ -395,8 +397,13 @@ function modalBody() {
       <h2 id="modal-title">새 서버 추가</h2>
       <p>마인크래프트 서버의 기본 정보를 입력합니다. ${state.mode==="demo"?"추가되는 서버는 예시 목록에만 반영됩니다.":"서버 생성은 API에 요청됩니다."}</p>
       <div class="stack"><div class="form-group"><label for="new-server-name">서버 이름</label>
-        <input id="new-server-name" name="server-name" class="field" maxlength="80" required placeholder="예: PvP Practice"></div>
-      <div class="form-group"><label for="new-server-kind">서버 유형</label><select class="select" id="new-server-kind" name="server-kind"><option>마인크래프트 · 새 서버</option><option>프록시</option></select></div></div>
+        <input id="new-server-name" name="server-name" class="field" maxlength="64" required placeholder="예: PvP Practice"></div>
+      <div class="field-grid">
+        <div class="form-group"><label for="new-server-port">접속 포트</label><input id="new-server-port" name="server-port" class="field" type="number" min="1024" max="65535" required value="25565"></div>
+        <div class="form-group"><label for="new-server-memory">메모리 (MiB)</label><input id="new-server-memory" name="server-memory" class="field" type="number" min="512" max="32768" required value="2048"></div>
+      </div>
+      <label class="checkbox-label"><input name="eula-accepted" type="checkbox" required> <span><a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener noreferrer">Minecraft EULA</a>를 읽고 동의합니다.</span></label>
+      <p class="hint">서버 생성 후 파일 메뉴에서 서버 JAR(server.jar)을 업로드해야 실행할 수 있습니다.</p></div>
       <div class="modal-actions" style="margin-top:25px"><button class="btn" type="button" data-action="modal-close">취소</button>
         <button class="btn primary" type="submit">서버 추가</button></div>
     </form></div>`;
@@ -871,8 +878,18 @@ document.addEventListener("submit",async(event) => {
       state.servers.push({id,name,kind:String(d.get("server-kind")||"마인크래프트"),status:"stopped",players:0,maxPlayers:20,memoryGb:0,memoryLimitGb:4,cpu:0,tps:null,mspt:null,port:25569,uptime:"—",version:"예시 서버",directory:"—"});
       state.selectedId=id;setModal(null);navigate("servers");toast("예시 서버를 목록에 추가했습니다. 실제 서버는 생성되지 않았습니다.");
     }else{
-      try{await apiRequest("/servers",{method:"POST",body:{name,kind:String(d.get("server-kind")||"마인크래프트")}});setModal(null);await loadFromApi();toast("서버 생성 요청이 접수되었습니다.");}
-      catch(e){toast(e.message);}
+      try{
+        const created=await apiRequest("/servers",{method:"POST",body:{
+          name,port:Number(d.get("server-port")),memoryMb:Number(d.get("server-memory")),
+          eulaAccepted:d.has("eula-accepted")
+        }});
+        setModal(null);
+        await loadFromApi();
+        if(created?.id)state.selectedId=created.id;
+        state.filePath="";state.selectedFile="";
+        navigate("files");await loadFiles();
+        toast("실제 서버 폴더가 생성되었습니다. server.jar 파일을 업로드하세요.");
+      }catch(e){toast(e.message);}
     }
   }
 });
