@@ -215,9 +215,25 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   if err:=assertMethod(r,"POST");err!=nil{return err}
   var data struct{Template string `json:"template"`; Version string `json:"version"`}
   if err:=decodeBody(r,&data);err!=nil{return err}
-  result,err:=a.manager.installTemplate(r.Context(),id,data.Template,data.Version);if err!=nil{return err}
+  result,err:=a.manager.installTemplate(r.Context(),id,data.Template,data.Version,false);if err!=nil{return err}
   a.audit.append("POST /install",id)
   jsonReply(w,201,result);return nil
+ }
+ if rest=="install/upgrade"{
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  var data struct{Template string `json:"template"`;Version string `json:"version"`}
+  if err:=decodeBody(r,&data);err!=nil{return err}
+  result,err:=a.manager.installTemplate(r.Context(),id,data.Template,data.Version,true)
+  if err!=nil{return err}
+  a.audit.append("POST /install/upgrade",id)
+  jsonReply(w,201,result);return nil
+ }
+ if rest=="install/rollback"{
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  result,err:=a.manager.rollbackJar(id)
+  if err!=nil{return err}
+  a.audit.append("POST /install/rollback",id)
+  jsonReply(w,200,result);return nil
  }
  if strings.HasPrefix(rest,"files") {
   return a.filesRoute(w,r,id,rest)
