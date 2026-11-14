@@ -1,6 +1,6 @@
 
 import { DEMO_SERVERS, DEMO_LOGS, DEMO_ACTIVITY, DEMO_FILES, DEMO_BACKUPS, DEMO_SCHEDULES, DEMO_USERS, DEMO_AUDIT, ROUTE_INFO } from "./data.js";
-import { escapeHtml as h, filterLogs, serverSummary, formatMemory, validateCommand, routeFromHash } from "./utils.mjs";
+import { escapeHtml as h, filterLogs, serverSummary, formatMemory, validateCommand, routeFromHash, appendBoundedLog, replaceLogHistory, recentLogs } from "./utils.mjs";
 import { apiEnabled, apiRequest, streamLogs } from "./api.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -45,7 +45,7 @@ const getStore = (key, fallback) => {
 const store = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
 const state = {
   route: routeFromHash(location.hash), selectedId: "pvpconnect",
-  servers: structuredClone(DEMO_SERVERS), logs: [...DEMO_LOGS], activity: [...DEMO_ACTIVITY],
+  servers: structuredClone(DEMO_SERVERS), logs: replaceLogHistory(DEMO_LOGS), activity: [...DEMO_ACTIVITY],
   schedules: [...DEMO_SCHEDULES], mode: apiEnabled ? "live" : "demo",
   loading: apiEnabled, apiError: "",
   query: "", serverQuery: "", serverStatus: "all", fileQuery: "", filePath: "/home/minecraft/server", selectedFile: "",
@@ -55,7 +55,9 @@ const state = {
   settings: getStore("pconn-settings", { panelName: "피컨", timezone: "Asia/Seoul", sessionHours: "24", retention: "7", audit: true })
 };
 document.documentElement.dataset.theme = state.theme === "dark" ? "dark" : "light";
-let toastTimer = null, logClose = null;
+let toastTimer = null, logClose = null, logRenderTimer = null;
+let logFetchVersion = 0, loadVersion = 0, commandPending = false;
+const LOG_FLUSH_MS = 130;
 const server = () => state.servers.find((s) => s.id === state.selectedId) || state.servers[0] || null;
 const routeTitle = () => routeMap[state.route]?.label || "대시보드";
 const selectedName = () => server()?.name || "서버 없음";
@@ -165,7 +167,7 @@ function renderOverview() {
 }
 const emptyServer = () => `<div class="card empty-state">${icon("server","large")}<strong>선택된 서버가 없습니다</strong><p>서버 목록에서 서버를 선택하세요.</p><a class="btn" href="#/servers">서버 목록 열기</a></div>`;
 function renderLogRows() {
-  const rows = filterLogs(state.logs,state.query,state.level).slice(-500);
+  const rows = recentLogs(state.logs,state.query,state.level);
   if (!rows.length) return `<div class="log-empty">조건에 맞는 로그가 없습니다.</div>`;
   return rows.map((row,i) => `<div class="log-line ${row.level.toLowerCase()}" role="row">
     <span class="mono">${String(i+1).padStart(2,"0")}</span>
@@ -191,7 +193,7 @@ function renderConsole() {
         <span class="console-separator console-desktop"></span><span class="console-muted console-desktop">${h(s?.name || "선택된 서버 없음")}</span>
         <span class="console-grow"></span><span class="console-muted console-desktop">실시간 출력</span>
         <span class="console-separator console-desktop"></span><span class="console-muted mono">UTF-8</span>
-        <span class="console-muted console-desktop">${filterLogs(state.logs,state.query,state.level).length}줄</span>
+        <span class="console-muted console-desktop">최근 ${recentLogs(state.logs,state.query,state.level).length}줄</span>
       </header>
       <div class="log-header log-grid"><span>번호</span><span>시각</span><span>수준</span><span>메시지</span></div>
       <div class="log-viewport" id="log-viewport" role="log" aria-live="off"><div class="log-rows" id="log-rows">${renderLogRows()}</div></div>
@@ -435,16 +437,34 @@ function scrollLogs() {
 }
 function updateLogRows() {
   const parent = $("#log-rows");
-  if (!parent) return;
+  if (!parent || state.route !== "console" || document.hidden) return;
   parent.innerHTML = renderLogRows();
   const count = $(".console-statusbar .console-muted:last-child");
-  if (count && count.textContent.endsWith("줄")) count.textContent = filterLogs(state.logs,state.query,state.level).length + "줄";
+  if (count && count.textContent.endsWith("줄")) {
+    count.textContent = "최근 " + recentLogs(state.logs,state.query,state.level).length + "줄";
+  }
   scrollLogs();
 }
+// Coalesce dense SSE traffic into at most one DOM update every 130ms.
+// A background tab keeps bounded log history without touching its DOM.
+function scheduleLogUpdate() {
+  if (logRenderTimer !== null || state.route !== "console" || document.hidden) return;
+  logRenderTimer = setTimeout(() => {
+    logRenderTimer = null;
+    updateLogRows();
+  }, LOG_FLUSH_MS);
+}
+function cancelLogUpdate() {
+  if (logRenderTimer !== null) clearTimeout(logRenderTimer);
+  logRenderTimer = null;
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && state.route === "console") updateLogRows();
+});
 function filterServerRows() {
+  const term = state.serverQuery.trim().toLocaleLowerCase("ko");
   document.querySelectorAll("[data-server-row]").forEach((tr) => {
     const text = tr.dataset.filterText || "";
-    const term = state.serverQuery.trim().toLocaleLowerCase("ko");
     tr.hidden = !(!term || text.includes(term)) || (state.serverStatus !== "all" && tr.dataset.status !== state.serverStatus);
   });
 }
@@ -484,7 +504,7 @@ async function sendCommand() {
   if (!command.valid) return toast(command.error);
   if (state.mode === "demo") {
     const now = new Date().toLocaleTimeString("ko-KR", { hour12:false });
-    state.logs = [...state.logs,{time:now,level:"DEMO",message:"> "+command.value+" (실제 서버에 미전송)"}].slice(-2000);
+    appendBoundedLog(state.logs,{time:now,level:"DEMO",message:"> "+command.value+" (실제 서버에 미전송)"});
     state.command = "";
     const input = $("#console-command");
     if (input) input.value = "";
@@ -507,7 +527,7 @@ async function performPowerAction() {
   if (state.mode === "demo") {
     if (action === "stop") { s.status="stopped";s.players=0;s.memoryGb=0; }
     else { s.status="running"; }
-    state.logs.push({time:new Date().toLocaleTimeString("ko-KR",{hour12:false}),level:"DEMO",
+    appendBoundedLog(state.logs,{time:new Date().toLocaleTimeString("ko-KR",{hour12:false}),level:"DEMO",
       message:"서버 "+({stop:"중지",start:"시작",restart:"재시작"}[action])+" UI 시뮬레이션 (실제 프로세스 변경 없음)"});
     toast("예시 상태만 변경했습니다. 실제 서버는 제어하지 않았습니다.");
     render(); return;
@@ -561,7 +581,7 @@ function connectLogStream() {
 }
 window.addEventListener("hashchange", () => {
   state.route=routeFromHash(location.hash);state.mobileMenu=false;state.modal=null;
-  render();connectLogStream(); window.scrollTo({top:0,behavior:"instant"});
+  render();connectLogStream(); window.scrollTo({top:0,behavior:"auto"});
 });
 document.addEventListener("keydown",(event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==="k") {
