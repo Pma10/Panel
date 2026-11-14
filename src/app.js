@@ -1161,6 +1161,14 @@ document.addEventListener("submit",async(event) => {
   }
 });
 render();
+window.addEventListener("pconn-session-expired",()=>{
+  if(!apiEnabled)return;
+  state.authenticated=false;
+  state.authError="세션이 만료됐습니다. 다시 로그인하세요.";
+  state.servers=[];state.logs=[];
+  if(logClose){logClose();logClose=null;}
+  cancelLogUpdate();render();
+});
 window.addEventListener("pagehide", () => {
   cancelLogUpdate();
   if (logClose) { logClose(); logClose = null; }
