@@ -66,8 +66,11 @@ const SERVER_PAGE_SIZE = 60;
 const server = () => state.servers.find((s) => s.id === state.selectedId) || state.servers[0] || null;
 const routeTitle = () => routeMap[state.route]?.label || "대시보드";
 const selectedName = () => server()?.name || "서버 없음";
-const statusText = (status) => status === "running" ? "실행 중" : status === "stopped" ? "중지됨" : status === "starting" ? "시작 중" : "상태 알 수 없음";
-const badge = (status) => `<span class="status ${status === "running" ? "running" : "stopped"}"><i class="indicator"></i>${statusText(status)}</span>`;
+const statusText = (status) => ({
+  running:"실행 중",stopped:"중지됨",starting:"시작 중",
+  stopping:"종료 중",restarting:"재시작 대기"
+})[status] || "상태 알 수 없음";
+const badge = (status) => `<span class="status ${status === "running" ? "running" : status === "stopped" ? "stopped" : "warning"}"><i class="indicator"></i>${statusText(status)}</span>`;
 const fmtPlayers = (s) => s.maxPlayers ? `${s.players ?? 0} / ${s.maxPlayers}` : "—";
 const sectionNav = (section) => ROUTE_INFO.filter((item) => item.section === section).map((item) =>
   `<a href="#/${item.route}" class="nav-link ${state.route === item.route ? "active" : ""}" data-action="navigate" aria-current="${state.route === item.route ? "page" : "false"}">${icon(item.icon)}<span>${h(item.label)}</span></a>`
@@ -149,7 +152,7 @@ function renderServers() {
 function renderOverview() {
   const s = server();
   if (!s) return emptyServer();
-  const action = s.status === "stopped" ?
+  const action = ["stopped","restarting"].includes(s.status) ?
     button(`${icon("power","small")} 서버 시작`,"power-confirm","primary",`data-power="start"`) :
     `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
     ${button(`${icon("power","small")} 서버 중지`,"power-confirm","danger",`data-power="stop"`)}`;
@@ -578,8 +581,21 @@ function modalBody() {
         <div class="form-group"><label for="new-server-port">접속 포트</label><input id="new-server-port" name="server-port" class="field" type="number" min="1024" max="65535" required value="25565"></div>
         <div class="form-group"><label for="new-server-memory">메모리 (MiB)</label><input id="new-server-memory" name="server-memory" class="field" type="number" min="512" max="32768" required value="2048"></div>
       </div>
-      <label class="checkbox-label"><input name="eula-accepted" type="checkbox" required> <span><a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener noreferrer">Minecraft EULA</a>를 읽고 동의합니다.</span></label>
-      <p class="hint">서버 생성 후 파일 메뉴에서 서버 JAR(server.jar)을 업로드해야 실행할 수 있습니다.</p></div>
+      <div class="form-group"><label for="new-server-template">서버 템플릿</label>
+        <select id="new-server-template" name="server-template" class="select">
+          <option value="manual">직접 JAR 업로드 (Leaf · PmaPaper 등)</option>
+          ${state.mode==="live"?'<option value="paper">Paper · 공식 안정 빌드</option><option value="folia">Folia · 공식 안정 빌드</option>':''}
+        </select></div>
+      <div id="new-server-version-group" class="form-group" hidden>
+        <label for="new-server-version">Minecraft 버전</label>
+        <select id="new-server-version" name="server-version" class="select" disabled>
+          <option value="">템플릿을 먼저 선택하세요</option>
+        </select>
+        <small class="hint" id="new-server-version-hint">PaperMC 공식 API에서 안정 빌드 버전을 확인합니다.</small>
+      </div>
+      <label class="checkbox-label"><input name="eula-accepted" type="checkbox" required>
+        <span><a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener noreferrer">Minecraft EULA</a>를 읽고 동의합니다.</span></label>
+      <p class="hint">Paper/Folia는 안정 JAR을 검증해 자동 설치합니다. 기타 서버는 생성 후 파일 화면에서 server.jar을 업로드하세요.</p></div>
       <div class="modal-actions" style="margin-top:25px"><button class="btn" type="button" data-action="modal-close">취소</button>
         <button class="btn primary" type="submit">서버 추가</button></div>
     </form></div>`;
@@ -994,6 +1010,28 @@ document.addEventListener("input",(event) => {
   }
 });
 document.addEventListener("change",async(event) => {
+  if(event.target.id==="new-server-template" && state.mode==="live"){
+    const kind=event.target.value;
+    const group=$("#new-server-version-group"),select=$("#new-server-version"),hint=$("#new-server-version-hint");
+    if(!group||!select)return;
+    group.hidden=kind==="manual";
+    select.disabled=true;
+    select.replaceChildren(new Option("버전 목록을 불러오는 중…",""));
+    if(kind==="manual")return;
+    try{
+      const result=await apiRequest("/templates/"+encodeURIComponent(kind)+"/versions");
+      if($("#new-server-template")?.value!==kind)return;
+      const values=Array.isArray(result.versions)?result.versions:[];
+      select.replaceChildren(new Option("버전 선택",""),
+        ...values.map(v=>new Option(v,v)));
+      select.disabled=values.length===0;
+      if(hint)hint.textContent=values.length?values.length+"개 버전 중 선택 · 안정 빌드가 없으면 설치가 거절됩니다.":"제공되는 버전이 없습니다.";
+    }catch(error){
+      select.replaceChildren(new Option("버전을 불러오지 못했습니다",""));
+      if(hint)hint.textContent=error.message;
+    }
+    return;
+  }
   if (event.target.id==="log-autoscroll") {state.autoScroll=event.target.checked;scrollLogs();}
   if (event.target.id==="server-status"){state.serverStatus=event.target.value;state.serverPage=0;filterServerRows();}
   if (event.target.id==="file-upload-input" && state.mode==="live"){
@@ -1181,24 +1219,44 @@ document.addEventListener("submit",async(event) => {
   if(form.id==="create-server-form"){
     const d=new FormData(form);const name=String(d.get("server-name")||"").trim();
     if(!name)return toast("서버 이름을 입력해 주세요.");
+    const template=String(d.get("server-template")||"manual");
+    const version=String(d.get("server-version")||"");
+    if(state.mode==="live" && template!=="manual" && !version)return toast("자동 설치할 Minecraft 버전을 선택하세요.");
     if(state.mode==="demo"){
       if(state.servers.length>=50)return toast("예시 서버는 최대 50대까지 등록할 수 있습니다.");
       const id="demo-"+Date.now();
       state.servers.push({id,name,kind:String(d.get("server-kind")||"마인크래프트"),status:"stopped",players:0,maxPlayers:20,memoryGb:0,memoryLimitGb:4,cpu:0,tps:null,mspt:null,port:25569,uptime:"—",version:"예시 서버",directory:"—"});
       state.selectedId=id;setModal(null);navigate("servers");toast("예시 서버를 목록에 추가했습니다. 실제 서버는 생성되지 않았습니다.");
     }else{
+      const createButton=form.querySelector('[type="submit"]');
+      if(createButton?.disabled)return;
+      if(createButton)createButton.disabled=true;
       try{
         const created=await apiRequest("/servers",{method:"POST",body:{
           name,port:Number(d.get("server-port")),memoryMb:Number(d.get("server-memory")),
-          eulaAccepted:d.has("eula-accepted")
+          eulaAccepted:d.has("eula-accepted"),template
         }});
+        let installed=false;
+        if(template!=="manual"){
+          try{
+            toast("공식 안정 JAR을 다운로드하고 SHA-256을 확인하는 중입니다.");
+            await apiRequest("/servers/"+encodeURIComponent(created.id)+"/install",{
+              method:"POST",body:{template,version},timeoutMs:200000
+            });
+            installed=true;
+          }catch(installError){
+            toast("서버는 생성됐지만 자동 설치에 실패했습니다: "+installError.message);
+          }
+        }
         setModal(null);
         await loadFromApi();
         if(created?.id)state.selectedId=created.id;
         state.filePath="";state.selectedFile="";
         navigate("files");await loadFiles();
-        toast("실제 서버 폴더가 생성되었습니다. server.jar 파일을 업로드하세요.");
+        if(installed)toast("공식 JAR 설치가 완료되었습니다. 이제 서버를 시작할 수 있습니다.");
+        else if(template==="manual")toast("서버가 생성됐습니다. server.jar을 직접 업로드하세요.");
       }catch(e){toast(e.message);}
+      finally{if(createButton?.isConnected)createButton.disabled=false;}
     }
   }
 });
