@@ -94,6 +94,11 @@ func TestGoPanelLoginAndServerOperations(t *testing.T){
  response.Body.Close()
  text,err:=manager.readText(id,"hello.txt")
  if err!=nil||text!="BEFORE"{t.Fatalf("restored file %q: %v",text,err)}
+ response=req(t,server,"DELETE","/api/v1/servers/"+id+"/backups/"+backup.ID,nil,cookie,csrf)
+ if response.StatusCode!=200{t.Fatalf("delete backup: %d",response.StatusCode)}
+ response.Body.Close()
+ remaining,err:=manager.backups(id)
+ if err!=nil||len(remaining)!=0{t.Fatalf("backup deletion was not persisted: %d %v",len(remaining),err)}
  response=req(t,server,"GET","/api/v1/audit",nil,cookie,"")
  if response.StatusCode!=200{t.Fatalf("audit: %d",response.StatusCode)}
  response.Body.Close()
