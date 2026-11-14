@@ -11,7 +11,9 @@ import (
  "io"
  "os"
  "os/exec"
+ "net"
  "path/filepath"
+ "strconv"
  "strings"
  "sync"
  "time"
@@ -230,6 +232,11 @@ func (m *manager) start(id string)(map[string]any,error){
  if !s.cfg.EulaAccepted{m.mu.Unlock();return nil,apiError{409,"Minecraft EULA 동의가 필요합니다."}}
  if !validJar(s.cfg.Jar){m.mu.Unlock();return nil,apiError{400,"JAR 이름이 올바르지 않습니다."}}
  folder:=m.dir(id)
+ if orphanJavaRunning(folder) {m.mu.Unlock();return nil,apiError{409,"이전 패널에서 실행한 Java가 아직 살아 있습니다. 먼저 기존 프로세스를 안전하게 종료하세요."}}
+ portAddr:=net.JoinHostPort("127.0.0.1",strconv.Itoa(s.cfg.Port))
+ probe,portErr:=net.Listen("tcp",portAddr)
+ if portErr!=nil{m.mu.Unlock();return nil,apiError{409,"서버 포트가 이미 사용 중입니다. 기존 Minecraft 프로세스가 실행 중인지 확인하세요."}}
+ _=probe.Close()
  jar:=filepath.Join(folder,s.cfg.Jar)
  info,err:=os.Lstat(jar)
  if err!=nil||!info.Mode().IsRegular(){m.mu.Unlock();return nil,apiError{409,"서버 JAR 파일을 업로드하세요."}}
@@ -240,6 +247,10 @@ func (m *manager) start(id string)(map[string]any,error){
  stderr,err:=cmd.StderrPipe();if err!=nil{m.mu.Unlock();return nil,err}
  stdin,err:=cmd.StdinPipe();if err!=nil{m.mu.Unlock();return nil,err}
  if err:=cmd.Start();err!=nil{m.mu.Unlock();stdin.Close();return nil,apiError{500,"Java 실행 실패: "+err.Error()}}
+ if err:=os.WriteFile(filepath.Join(folder,".panel-process"),[]byte(strconv.Itoa(cmd.Process.Pid)+"\n"),0600);err!=nil{
+  _=cmd.Process.Kill();_ = cmd.Wait();m.mu.Unlock();stdin.Close()
+  return nil,apiError{500,"Java PID 기록에 실패해 실행을 취소했습니다."}
+ }
  p:=&managedProcess{cmd:cmd,stdin:stdin,done:make(chan struct{}),state:"starting",started:time.Now()}
  s.process=p
  result:=m.describe(s)
@@ -253,6 +264,7 @@ func (m *manager) start(id string)(map[string]any,error){
   pipes.Wait()
   err:=cmd.Wait()
   stdin.Close()
+  _=os.Remove(filepath.Join(folder,".panel-process"))
   m.mu.Lock()
   if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false}
   restart:=err!=nil&&!p.expectedStop&&s.cfg.AutoRestart&&!m.closing
