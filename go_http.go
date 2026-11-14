@@ -11,6 +11,7 @@ import (
  "path"
  "path/filepath"
  "strings"
+ "sync"
  "time"
 )
 
@@ -19,10 +20,13 @@ type panelAPI struct{
  auth *authenticator
  origin string
  audit *auditLog
+ closed chan struct{}
+ closeOnce sync.Once
 }
 func newPanelAPI(m *manager, origin,password string)*panelAPI{
- return &panelAPI{manager:m,auth:newAuthenticator(password,origin),origin:origin,audit:newAudit(m.root)}
+ return &panelAPI{manager:m,auth:newAuthenticator(password,origin),origin:origin,audit:newAudit(m.root),closed:make(chan struct{})}
 }
+func (a *panelAPI)closeStreams(){a.closeOnce.Do(func(){close(a.closed)})}
 func jsonReply(w http.ResponseWriter,status int,value any){
  w.Header().Set("Content-Type","application/json; charset=utf-8")
  w.Header().Set("Cache-Control","no-store")
@@ -68,7 +72,10 @@ func (a *panelAPI)ServeHTTP(w http.ResponseWriter,r *http.Request){
  if r.Method!="GET"&&r.Method!="HEAD"{http.Error(w,"Method not allowed",405);return}
  file:=r.URL.Path
  if file=="/"{file="/index.html"}
- if file!="/index.html" && !strings.HasPrefix(file,"/src/"){http.NotFound(w,r);return}
+ if file!="/index.html" && !(strings.HasPrefix(file,"/src/") &&
+  (strings.HasSuffix(file,".js")||strings.HasSuffix(file,".mjs")||strings.HasSuffix(file,".css"))){
+  http.NotFound(w,r);return
+ }
  if strings.Contains(file,"..") || strings.Contains(file,"\\") {http.NotFound(w,r);return}
  relative:=strings.TrimPrefix(file,"/")
  if path.Clean(relative)!=relative{http.NotFound(w,r);return}
@@ -252,6 +259,7 @@ func (a *panelAPI)sse(w http.ResponseWriter,r *http.Request,id string)error{
  for{
   select{
   case <-r.Context().Done():return nil
+  case <-a.closed:return nil
   case entry,ok:=<-ch:
    if !ok{return nil}
    raw,_:=json.Marshal(entry)
