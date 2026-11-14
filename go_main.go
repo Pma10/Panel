@@ -12,6 +12,7 @@ import (
  "os"
  "os/signal"
  "path/filepath"
+ "runtime"
  "strconv"
  "strings"
  "syscall"
@@ -26,7 +27,19 @@ func envDefault(key, fallback string) string {
  return fallback
 }
 
+// Injected by release builds; development binaries report "dev".
+var version = "dev"
+
 func main() {
+ if len(os.Args)>1 {
+  switch os.Args[1] {
+  case "--version","-version":
+   fmt.Printf("pconn %s (%s/%s)\n",version,runtime.GOOS,runtime.GOARCH)
+   return
+  default:
+   log.Fatalf("unknown option %q; supported: --version",os.Args[1])
+  }
+ }
  if err := run(); err != nil {
   log.Fatal(err)
  }
