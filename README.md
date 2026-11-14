@@ -53,7 +53,7 @@ Go 실행 파일 하나에 담긴 웹 관리 패널.
 **필요 환경:** Go 1.23 이상(소스 빌드에만 필요), Minecraft 버전에 맞는 Java(예: Java 21), Git. 기본 관리자 접속은 로컬호스트 전용입니다.
 
 <details open>
-<summary><strong>Linux / macOS · 로컬 테스트</strong></summary>
+<summary><strong>Linux / macOS · Bash 로컬 테스트</strong></summary>
 
 ~~~bash
 git clone --branch feat/unslop-panel-foundation https://github.com/Pma10/Panel.git
@@ -179,6 +179,8 @@ Panel은 **단일 호스트·단일 관리자·신뢰 가능한 서버 JAR**을 
 - **[단계별 시작 가이드](docs/getting-started.md)** — 설치, 첫 서버, 콘솔, 백업, 문제 해결
 - **[운영 및 배포](docs/go-backend.md)** — 설정, systemd, Docker 예제와 보안 주의 사항
 - **[아키텍처](docs/architecture.md)** — 모듈 구조, 메모리 정책과 유지보수
+- **[보안 정책](SECURITY.md)** — 신뢰 경계, 운영 주의사항, 취약점 제보
+- **[기여 가이드](CONTRIBUTING.md)** — 코드 구조, 테스트 기준, 변경 제안 방법
 - **[개발 PR #1](https://github.com/Pma10/Panel/pull/1)** — 현재 변경 사항과 작업 현황
 
 ~~~bash
