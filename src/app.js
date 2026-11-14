@@ -803,17 +803,23 @@ async function openTextFile(name){
   } catch(e){toast(e.message);}
 }
 async function createBackup() {
-  if (state.mode === "demo") { setModal(null); return toast("예시 모드: 실제 백업을 생성하지 않았습니다."); }
-  try { await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups",{method:"POST"});toast("백업 작업이 접수되었습니다."); }
-  catch(e) { toast(e.message); }
   setModal(null);
+  if (state.mode === "demo") return toast("예시 모드: 실제 백업을 생성하지 않았습니다.");
+  toast("백업을 생성하는 중입니다. 서버 데이터 크기에 따라 시간이 걸릴 수 있습니다.");
+  try {
+    await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups",{method:"POST",timeoutMs:600000});
+    toast("백업 완료");await refreshRouteData();
+  }catch(e){toast(e.message);}
 }
 async function restoreBackup() {
   const id=state.modal?.id;setModal(null);
-  if (!id) return;
-  if (state.mode === "demo") return toast("예시 모드: 실제 백업 복원은 실행되지 않았습니다.");
-  try { await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups/"+encodeURIComponent(id)+"/restore",{method:"POST"});toast("복원 작업이 접수되었습니다.");}
-  catch(e) { toast(e.message); }
+  if (!id)return;
+  if (state.mode==="demo")return toast("예시 모드: 실제 백업 복원은 실행되지 않았습니다.");
+  toast("백업을 복원하는 중입니다. 작업이 끝날 때까지 서버를 시작하지 마세요.");
+  try {
+    await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups/"+encodeURIComponent(id)+"/restore",{method:"POST",timeoutMs:600000});
+    toast("백업 복원 완료");await refreshRouteData();
+  }catch(e){toast(e.message);}
 }
 async function loadSelectedLogs() {
   const version = ++logFetchVersion;
@@ -1033,19 +1039,31 @@ document.addEventListener("click",async(event) => {
       description:"백업 #"+id+"으로 복원하면 현재 월드 데이터가 바뀔 수 있습니다. 복원 전에 별도 백업을 권장합니다.",
       id,confirmLabel:"복원",confirmAction:"restore-run",danger:true});return;}
   if (action==="restore-run"){await restoreBackup();return;}
-  if (action==="audit-export"){downloadText("pconn-audit.txt",DEMO_AUDIT.map((x)=>[x.time,x.action,x.actor,x.target].join(" | ")).join("\n"));toast("예시 감사 기록을 내보냈습니다.");return;}
+  if (action==="audit-export"){
+    const rows=state.mode==="demo"?DEMO_AUDIT.map(x=>[x.time,x.action,x.actor,x.target].join(" | ")):
+      (state.audit||[]).map(x=>[x.time,x.action,x.serverId||"패널"].join(" | "));
+    downloadText("pconn-audit.txt",rows.join("\n"));toast("감사 기록을 내보냈습니다.");return;
+  }
   if (action==="theme-toggle"){
     state.theme=state.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=state.theme;store("pconn-theme",state.theme);render();return;
   }
   if (action==="show-notifications"){setModal({kind:"notice",title:"알림",description:"현재 확인할 새 알림이 없습니다. 실제 서버 알림은 API 연동 이후 제공됩니다.",
     confirmLabel:"닫기",confirmAction:"modal-close"});return;}
   if (action==="api-retry"){await loadFromApi();return;}
+  if (action==="health-check"){
+    if(state.mode==="live")await refreshRouteData();else toast("예시 데이터만 표시 중입니다.");return;
+  }
+  if (action==="schedule-delete" && state.mode==="live"){
+    try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/schedules/"+encodeURIComponent(target.dataset.id),{method:"DELETE"});
+      toast("예약 작업 삭제 완료");await refreshRouteData();
+    }catch(e){toast(e.message);}return;
+  }
   if (action==="logout"){
     try{await signOut();}catch(e){toast(e.message);}
     if(logClose){logClose();logClose=null;}
     state.authenticated=false;state.authError="";state.logs=[];state.servers=[];render();return;
   }
-  if (["file-upload","file-new-folder","network-add","user-invite","health-check"].includes(action)){mockActionMessage(action);return;}
+  if (["network-add","user-invite"].includes(action)){mockActionMessage(action);return;}
   if (action==="log-level"){
     state.level=target.dataset.level;
     document.querySelectorAll('[data-action="log-level"]').forEach((btn) => {
@@ -1068,7 +1086,7 @@ document.addEventListener("submit",async(event) => {
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
   }
-  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form"].includes(form.id))return;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="console-form"){await sendCommand();return;}
   if(form.id==="file-editor-form"){
@@ -1091,7 +1109,16 @@ document.addEventListener("submit",async(event) => {
       memory:String(d.get("memory")||""),timeout:String(d.get("timeout")||""),
       arguments:String(d.get("arguments")||""),autoRestart:d.has("autoRestart")};
     if(state.mode==="demo"){state.startup=input;store("pconn-startup",input);toast("예시 시작 설정만 브라우저에 저장했습니다.");}
-    else{try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/startup",{method:"PATCH",body:input});toast("설정 저장 요청이 완료되었습니다.");}catch(e){toast(e.message);}}
+    else{
+      try{
+        await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/startup",{
+          method:"PATCH",body:{name:String(d.get("live-name")||""),
+            memoryMb:Number(d.get("live-memory")),jar:String(d.get("live-jar")||"server.jar"),
+            eulaAccepted:d.has("live-eula")}
+        });
+        toast("시작 설정을 저장했습니다.");await refreshRouteData();await loadFromApi();
+      }catch(e){toast(e.message);}
+    }
     return;
   }
   if(form.id==="settings-form"){
@@ -1104,7 +1131,7 @@ document.addEventListener("submit",async(event) => {
     const d=new FormData(form);const name=String(d.get("schedule-name")||"").trim();
     if(!name)return toast("작업 이름을 입력해 주세요.");
     if(state.mode==="demo"){if(state.schedules.length>=50)return toast("예시 작업은 최대 50개까지 등록할 수 있습니다.");state.schedules.push({id:"demo-"+Date.now(),name,when:String(d.get("schedule-cron")||""),type:String(d.get("schedule-type")||"백업"),active:false});render();toast("예시 작업에만 추가되었습니다. 실제 실행은 예약되지 않았습니다.");}
-    else{try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/schedules",{method:"POST",body:{name,cron:String(d.get("schedule-cron")),type:String(d.get("schedule-type"))}});toast("예약 작업 생성 요청이 접수되었습니다.");}catch(e){toast(e.message);}}
+    else{try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/schedules",{method:"POST",body:{name,cron:String(d.get("schedule-cron")),type:String(d.get("schedule-type"))}});toast("예약 작업을 등록했습니다.");await refreshRouteData();}catch(e){toast(e.message);}}
     return;
   }
   if(form.id==="create-server-form"){
