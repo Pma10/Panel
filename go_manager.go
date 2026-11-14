@@ -58,6 +58,7 @@ type managedServer struct{
  process *managedProcess
  busy bool
  logs []logEntry
+ logHead int
  subscribers map[chan logEntry]struct{}
  mcStatus *minecraftStatus
  memoryGB float64
@@ -244,14 +245,26 @@ func (m *manager) log(id,level,msg string){
  s,ok:=m.servers[id];if !ok{return}
  if len(msg)>2048{msg=msg[:2048]}
  e:=logEntry{Time:time.Now().Format("15:04:05"),Level:level,Message:msg}
- s.logs=append(s.logs,e)
- if len(s.logs)>400{s.logs=append([]logEntry(nil),s.logs[len(s.logs)-400:]...)}
+ if len(s.logs)<400{
+  s.logs=append(s.logs,e)
+ }else{
+  // Fixed-capacity ring: one overwrite per log instead of allocating a new
+  // 400-element slice for each message in a busy Minecraft console.
+  s.logs[s.logHead]=e
+  s.logHead=(s.logHead+1)%len(s.logs)
+ }
  for ch:=range s.subscribers{select{case ch<-e:default:close(ch);delete(s.subscribers,ch)}}
 }
 func (m *manager) history(id string)([]logEntry,error){
  m.mu.Lock();defer m.mu.Unlock()
  s,err:=m.get(id);if err!=nil{return nil,err}
- return append([]logEntry{},s.logs...),nil
+ count:=len(s.logs)
+ result:=make([]logEntry,0,count)
+ if count>0{
+  result=append(result,s.logs[s.logHead:]...)
+  result=append(result,s.logs[:s.logHead]...)
+ }
+ return result,nil
 }
 func (m *manager) subscribe(id string)(<-chan logEntry,func(),error){
  m.mu.Lock();defer m.mu.Unlock()
