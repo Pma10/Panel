@@ -8,7 +8,8 @@ import (
 
 // Go exec.Cmd streams into boundedConsoleWriter without retaining the entire
 // stdout/stderr output. In particular, long plugin lines cannot grow memory.
-const maxConsoleLineBytes = 2048
+// Leave space for the truncation marker before manager.log enforces 2048 bytes.
+const maxConsoleLineBytes = 1984
 
 type boundedConsoleWriter struct {
     mu        sync.Mutex
