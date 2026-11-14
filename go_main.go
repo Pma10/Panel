@@ -8,6 +8,7 @@ import (
  "log"
  "net"
  "net/http"
+ "net/url"
  "os"
  "os/signal"
  "path/filepath"
@@ -38,8 +39,11 @@ func run() error {
  }
  host := envDefault("PANEL_BIND_HOST", "127.0.0.1")
  origin := envDefault("PANEL_PUBLIC_ORIGIN", "http://127.0.0.1:"+port)
- if origin != strings.TrimSuffix(origin, "/") || (!strings.HasPrefix(origin, "https://") && !strings.HasPrefix(origin, "http://")) {
-  return errors.New("PANEL_PUBLIC_ORIGIN must be an exact HTTP(S) origin")
+ parsed,err:=url.Parse(origin)
+ if err!=nil||parsed.Host==""||parsed.User!=nil||parsed.RawQuery!=""||parsed.Fragment!=""||
+  parsed.Path!=""||(parsed.Scheme!="http"&&parsed.Scheme!="https")||
+  parsed.String()!=origin {
+  return errors.New("PANEL_PUBLIC_ORIGIN must be scheme://host[:port], without path, query or credentials")
  }
  if host != "127.0.0.1" && host != "::1" && host != "localhost" && !strings.HasPrefix(origin, "https://") {
   return errors.New("public bind requires an HTTPS reverse proxy")
@@ -70,6 +74,7 @@ func run() error {
   <-done
   ctx, cancel := context.WithTimeout(context.Background(), 43*time.Second)
   defer cancel()
+  api.closeStreams()
   if e := manager.shutdown(ctx); e != nil { log.Printf("Java 종료: %v", e) }
   if e := srv.Shutdown(ctx); e != nil { log.Printf("HTTP 종료: %v", e) }
  }()
