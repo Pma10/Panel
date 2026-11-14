@@ -8,6 +8,7 @@ import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 import { HttpError, assert, stringValue, positiveInt, confinedPath, safeRelative } from "./security.mjs";
 import { pingMinecraft } from "./ping.mjs";
+import { TEMPLATES, allowedTemplate, automaticTemplate, installStableJar } from "./templates.mjs";
 
 const MAX_LOGS=400, MAX_LOG_LENGTH=2048, MAX_UPLOAD=256*1024*1024;
 const MAX_BACKUP_BYTES=8*1024*1024*1024, MAX_FILES=100_000;
@@ -92,13 +93,16 @@ export class MinecraftManager {
       maxPlayers:probe?.maxPlayers??null,players:probe?.players??null,tps:null,mspt:null,cpu:null,
       latencyMs:probe?.latencyMs??null,joinable:Boolean(probe),
       port:item.port,version:probe?.version??item.jar,jar:item.jar,
+      template:item.template??"manual",installedVersion:item.installedVersion??null,
+      installedAt:item.installedAt??null,
       directory:this.dir(item.id),uptime:child?.startedAt?
         Math.max(0,Math.floor((Date.now()-child.startedAt)/1000))+"초":"—",
       eulaAccepted:item.eulaAccepted
     };
   }
   async list() {return await Promise.all([...this.servers.values()].map(x=>this.summary(x)));}
-  async create({name,memoryMb=2048,port,eulaAccepted=false}={}) {
+  async create({name,memoryMb=2048,port,eulaAccepted=false,template="manual"}={}) {
+    assert(allowedTemplate(template),400,"지원하지 않는 서버 템플릿입니다.");
     name=safeName(name);
     memoryMb=positiveInt(memoryMb,"메모리",JAVA_MEMORY_MIN,JAVA_MEMORY_MAX);
     port=positiveInt(port,"포트",1024,65535);
@@ -108,7 +112,7 @@ export class MinecraftManager {
     assert(!this.creating,409,"서버 생성 작업이 이미 진행 중입니다.");
     this.creating=true;
     const id=makeId(),dir=join(this.serversDir,id);
-    const cfg={id,name,memoryMb,port,jar:"server.jar",eulaAccepted,createdAt:now(),schedules:[]};
+    const cfg={id,name,memoryMb,port,jar:"server.jar",eulaAccepted,template,installedVersion:null,createdAt:now(),schedules:[]};
     try {
       await mkdir(dir,{mode:0o700});
       await writeFile(join(dir,"eula.txt"),"eula="+eulaAccepted+"\n");
@@ -118,6 +122,28 @@ export class MinecraftManager {
     }catch(error){this.creating=false;this.servers.delete(id);this.logs.delete(id);await rm(dir,{recursive:true,force:true});throw error;}
     this.creating=false;
     return this.summary(cfg);
+  }
+  async install(id,{template,version}={}) {
+    const cfg=this.get(id);
+    assert(automaticTemplate(template),400,"공식 Paper/Folia 자동 설치만 지원합니다.");
+    assert(!this.active.has(id),409,"서버를 중지한 뒤 설치하세요.");
+    assert(!this.busy.has(id),409,"이미 서버 작업이 진행 중입니다.");
+    // Do not accept a client URL, command, installer script or arbitrary JAR path.
+    this.busy.add(id);
+    try {
+      this.pushLog(id,"INFO","공식 안정 빌드 확인: "+template+" "+String(version).slice(0,48));
+      const installed=await installStableJar({directory:this.dir(id),project:template,version});
+      cfg.template=template;
+      cfg.installedVersion=installed.version;
+      cfg.installedAt=installed.installedAt;
+      cfg.jar="server.jar";
+      await this.persist();
+      this.pushLog(id,"INFO","설치 완료: "+template+" "+installed.version+" ("+installed.size+" bytes)");
+      return installed;
+    }catch(error){
+      this.pushLog(id,"WARN","설치 실패: "+error.message);
+      throw error;
+    }finally{this.busy.delete(id);}
   }
   async update(id,input) {
     const cfg=this.get(id);
