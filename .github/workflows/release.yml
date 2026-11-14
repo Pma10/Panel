@@ -1,0 +1,93 @@
+name: Go Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - run: gofmt -w *.go
+      - run: go vet ./...
+      - run: go test -race -count=1 -timeout=180s ./...
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Compile static binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: "0"
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          name="pconn"
+          if [ "$GOOS" = "windows" ]; then name="pconn.exe"; fi
+          go build -trimpath -ldflags="-s -w -X main.version=$RELEASE_TAG" -o "out/$name" .
+          if [ "$GOOS" = "windows" ]; then
+            (cd out && zip -9 "pconn-$GOOS-$GOARCH.zip" "$name")
+          else
+            tar -C out -czf "out/pconn-$GOOS-$GOARCH.tar.gz" "$name"
+          fi
+          rm "out/$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.os }}-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum pconn-* > SHA256SUMS
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* --title "피컨 $TAG" \
+            --notes "Go 단일 실행 파일. 설치 전 README와 docs/go-backend.md의 운영 및 백업 주의 사항을 확인하세요." \
+            --verify-tag
