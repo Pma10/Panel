@@ -14,6 +14,15 @@ const MAX_LOGS=400, MAX_LOG_LENGTH=2048, MAX_UPLOAD=256*1024*1024;
 const MAX_BACKUP_BYTES=8*1024*1024*1024, MAX_FILES=100_000;
 const JAVA_MEMORY_MIN=512, JAVA_MEMORY_MAX=32768;
 const now=()=>new Date().toISOString();
+// Java and plugins can read their process environment; never pass panel credentials.
+export function safeJavaEnvironment(source=process.env) {
+  const allowed = ["PATH","HOME","USER","LOGNAME","LANG","LC_ALL","LC_CTYPE","TZ",
+    "JAVA_HOME","TMPDIR","TMP","TEMP","SystemRoot","SYSTEMROOT","windir",
+    "USERPROFILE","APPDATA","LOCALAPPDATA","PATHEXT"];
+  const env={};
+  for (const key of allowed) if (typeof source[key] === "string") env[key]=source[key];
+  return env;
+}
 const makeId=()=>randomUUID().replaceAll("-","").slice(0,16);
 const safeName=s=>stringValue(s,"서버 이름",64);
 const serialName=s=>{assert(/^[a-zA-Z0-9._-]{1,100}$/.test(s)&&s!=="."&&s!==".."&&!s.startsWith("."),400,"파일 이름 형식이 올바르지 않습니다.");return s;};
@@ -30,6 +39,7 @@ export class MinecraftManager {
     this.saveQueue=Promise.resolve();
     this.events=new EventEmitter();this.events.setMaxListeners(256);
     this.busy=new Set();this.creating=false;this.stopped=false;this.scheduleTimer=null;
+    this.restartTimers=new Map();this.crashHistory=new Map();
     this.statuses=new Map();this.statusPollTimer=null;this.polling=false;
   }
   async init() {
@@ -77,7 +87,7 @@ export class MinecraftManager {
   history(id){this.get(id);return [...(this.logs.get(id)||[])];}
   async summary(item) {
     const child=this.active.get(item.id);
-    const status=child ? child.status : "stopped";
+    const status=child ? child.status : this.restartTimers.has(item.id)?"restarting":"stopped";
     const cached=this.statuses.get(item.id);
     const probe=child && cached && Date.now()-cached.checkedAt<90000?cached:null;
     let memoryGb=null;
@@ -93,6 +103,7 @@ export class MinecraftManager {
       maxPlayers:probe?.maxPlayers??null,players:probe?.players??null,tps:null,mspt:null,cpu:null,
       latencyMs:probe?.latencyMs??null,joinable:Boolean(probe),
       port:item.port,version:probe?.version??item.jar,jar:item.jar,
+      autoRestart: Boolean(item.autoRestart),
       template:item.template??"manual",installedVersion:item.installedVersion??null,
       installedAt:item.installedAt??null,
       directory:this.dir(item.id),uptime:child?.startedAt?
@@ -112,7 +123,7 @@ export class MinecraftManager {
     assert(!this.creating,409,"서버 생성 작업이 이미 진행 중입니다.");
     this.creating=true;
     const id=makeId(),dir=join(this.serversDir,id);
-    const cfg={id,name,memoryMb,port,jar:"server.jar",eulaAccepted,template,installedVersion:null,createdAt:now(),schedules:[]};
+    const cfg={id,name,memoryMb,port,jar:"server.jar",eulaAccepted,template,installedVersion:null,autoRestart:false,createdAt:now(),schedules:[]};
     try {
       await mkdir(dir,{mode:0o700});
       await writeFile(join(dir,"eula.txt"),"eula="+eulaAccepted+"\n");
@@ -153,6 +164,11 @@ export class MinecraftManager {
     if(input.name!==undefined)cfg.name=safeName(input.name);
     if(input.memoryMb!==undefined)cfg.memoryMb=positiveInt(input.memoryMb,"메모리",JAVA_MEMORY_MIN,JAVA_MEMORY_MAX);
     if(input.jar!==undefined)cfg.jar=javaJarName(input.jar);
+    if(input.autoRestart!==undefined){
+      assert(typeof input.autoRestart==="boolean",400,"자동 재시작 설정이 올바르지 않습니다.");
+      cfg.autoRestart=input.autoRestart;
+      if(!input.autoRestart)this.clearRestartTimer(id);
+    }
     if(input.eulaAccepted!==undefined){
       assert(typeof input.eulaAccepted==="boolean",400,"EULA 값이 올바르지 않습니다.");
       cfg.eulaAccepted=input.eulaAccepted;
@@ -163,6 +179,8 @@ export class MinecraftManager {
   }
   async start(id){
     const cfg=this.get(id);
+    assert(!this.stopped,409,"패널 종료 중에는 서버를 시작할 수 없습니다.");
+    this.clearRestartTimer(id);
     assert(!this.active.has(id),409,"서버가 이미 실행 중입니다.");
     assert(!this.busy.has(id),409,"백업/복원 중에는 서버를 시작할 수 없습니다.");
     assert(cfg.eulaAccepted,409,"Minecraft EULA 동의가 필요합니다.");
@@ -172,9 +190,9 @@ export class MinecraftManager {
     catch(e){if(e.code==="ENOENT")throw new HttpError(409,"서버 JAR 파일이 없습니다. 파일 관리에서 "+cfg.jar+"를 업로드하세요.");throw e;}
     assert((await stat(jar)).isFile(),409,"실행 JAR 파일이 없습니다.");
     const child=spawn(this.javaBin,["-Xms"+Math.min(512,cfg.memoryMb)+"M","-Xmx"+cfg.memoryMb+"M","-jar",cfg.jar,"nogui"],{
-      cwd:folder,env:{...process.env},stdio:["pipe","pipe","pipe"],shell:false,windowsHide:true
+      cwd:folder,env:safeJavaEnvironment(),stdio:["pipe","pipe","pipe"],shell:false,windowsHide:true
     });
-    const item={proc:child,status:"starting",startedAt:Date.now(),pending:"",stopTimer:null,killTimer:null};
+    const item={proc:child,status:"starting",startedAt:Date.now(),expectedStop:false,stopTimer:null,killTimer:null};
     this.active.set(id,item);
     const pipeLines=(stream,level)=>{
       let buffer="";
@@ -198,8 +216,11 @@ export class MinecraftManager {
     child.once("exit",(code,signal)=>{
       if(item.stopTimer)clearTimeout(item.stopTimer);
       if(item.killTimer)clearTimeout(item.killTimer);
+      if(this.active.get(id)!==item)return;
       this.active.delete(id);this.statuses.delete(id);
-      this.pushLog(id,"INFO","Java 프로세스 종료: code="+code+" signal="+signal);
+      this.pushLog(id,code===0?"INFO":"WARN","Java 프로세스 종료: code="+code+" signal="+signal);
+      if(!item.expectedStop && !this.stopped && cfg.autoRestart)
+        this.scheduleCrashRestart(id,item.startedAt);
     });
     try {
       await new Promise((resolve,reject)=>{
@@ -209,13 +230,12 @@ export class MinecraftManager {
       this.active.delete(id);
       throw new HttpError(500,"Java 실행 실패: "+error.message);
     }
-    item.status="running";
-    this.pushLog(id,"INFO","Java 서버 시작 요청: PID "+child.pid);
+    this.pushLog(id,"INFO","Java 서버 실행 요청: PID "+child.pid+" (게임 시작 확인 대기)");
     return this.summary(cfg);
   }
   command(id,raw){
     const running=this.active.get(id);
-    assert(running && running.status==="running" && running.proc.stdin.writable,409,"실행 중인 서버가 아닙니다.");
+    assert(running && ["starting","running"].includes(running.status) && running.proc.stdin.writable,409,"실행 중인 서버가 아닙니다.");
     const command=stringValue(raw,"명령어",512);
     assert(!/[\r\n\0]/.test(command),400,"여러 줄 명령어는 사용할 수 없습니다.");
     running.proc.stdin.write(command+"\n");
@@ -223,8 +243,12 @@ export class MinecraftManager {
   }
   async stop(id) {
     const running=this.active.get(id);
+    if(!running && this.restartTimers.has(id)){
+      this.clearRestartTimer(id);return {accepted:true};
+    }
     assert(running,409,"서버가 실행 중이 아닙니다.");
     if(running.status==="stopping")return {accepted:true};
+    running.expectedStop=true;
     running.status="stopping";
     try {running.proc.stdin.write("stop\n");}
     catch {running.proc.kill("SIGTERM");}
@@ -252,6 +276,33 @@ export class MinecraftManager {
     });
     return this.start(id);
   }
+  clearRestartTimer(id){
+    const timer=this.restartTimers.get(id);
+    if(timer){clearTimeout(timer);this.restartTimers.delete(id);}
+  }
+  scheduleCrashRestart(id,lastStart){
+    if(this.stopped||this.restartTimers.has(id))return;
+    const nowTime=Date.now();
+    const prev=this.crashHistory.get(id)||[];
+    const recent=(nowTime-lastStart>600000?[]:prev).filter(t=>nowTime-t<600000);
+    if(recent.length>=3){
+      this.pushLog(id,"ERROR","10분 동안 재시작 3회 초과: 자동 재시작 중단. 서버 설정을 확인하세요.");
+      this.crashHistory.set(id,recent);
+      return;
+    }
+    recent.push(nowTime);
+    this.crashHistory.set(id,recent);
+    const wait=Math.min(30000,5000*2**(recent.length-1));
+    this.pushLog(id,"WARN","비정상 종료 감지: "+(wait/1000)+"초 후 자동 재시작 ("+recent.length+"/3)");
+    const timer=setTimeout(async()=>{
+      this.restartTimers.delete(id);
+      if(this.stopped||this.active.has(id)||!this.servers.get(id)?.autoRestart)return;
+      try{await this.start(id);}
+      catch(error){this.pushLog(id,"ERROR","자동 재시작 실패: "+error.message);}
+    },wait);
+    timer.unref();
+    this.restartTimers.set(id,timer);
+  }
   async waitForStop(id,timeoutMs=39000){
     const started=Date.now();
     while(this.active.has(id)){
@@ -263,6 +314,7 @@ export class MinecraftManager {
     this.stopped=true;
     if(this.scheduleTimer)clearInterval(this.scheduleTimer);
     if(this.statusPollTimer)clearInterval(this.statusPollTimer);
+    for(const id of this.restartTimers.keys())this.clearRestartTimer(id);
     const ids=[...this.active.keys()];
     await Promise.all(ids.map(async id=>{
       try{await this.stop(id);await this.waitForStop(id);}
@@ -473,8 +525,11 @@ export class MinecraftManager {
           if(!cfg || !this.active.has(id))return;
           const status=await pingMinecraft(cfg.port);
           if(this.active.has(id)){
-            if(status)this.statuses.set(id,status);
-            else this.statuses.delete(id);
+            if(status){
+              this.statuses.set(id,status);
+              const active=this.active.get(id);
+              if(active && active.status==="starting")active.status="running";
+            }else this.statuses.delete(id);
           }
         }));
       }
