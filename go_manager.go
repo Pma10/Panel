@@ -453,9 +453,18 @@ func (m *manager) shutdown(ctx context.Context)error{
  if !m.closing{m.closing=true;close(m.stopScheduler)}
  for id,timer:=range m.pendingRestarts{timer.Stop();delete(m.pendingRestarts,id)}
  ids:=[]string{}
- for id,s:=range m.servers{if s.process!=nil{ids=append(ids,id)}}
+ resume:=[]string{}
+ for id,s:=range m.servers{
+  if s.process==nil{continue}
+  ids=append(ids,id)
+  // Respect an operator-issued stop already in progress. A panel update
+  // must not bring that server back online.
+  if !s.process.expectedStop && s.process.state!="stopping"{
+   resume=append(resume,id)
+  }
+ }
  m.mu.Unlock()
- if err:=m.saveResumeList(ids);err!=nil{
+ if err:=m.saveResumeList(resume);err!=nil{
   // Never silently claim the running servers can be resumed on the next start.
   log.Printf("Warning: failed to persist running-server resume state: %v",err)
  }
