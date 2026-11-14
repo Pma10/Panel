@@ -56,7 +56,7 @@ if [[ "$action" == rollback ]]; then
   exit 0
 fi
 
-[[ "$tag" =~ ^v[0-9]+$.[0-9]+$.[0-9]+(-[a-zA-Z0-9.-]+)?$$ ]] || usage
+[[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]] || usage
 for command in curl sha256sum tar install; do
   command -v "$command" >/dev/null || { echo "Missing: $command" >&2; exit 1; }
 done
@@ -72,7 +72,7 @@ url="https://github.com/Pma10/Panel/releases/download/$tag"
 echo "Downloading signed-transport release $tag for linux/$arch..."
 curl -fL --retry 3 --proto '=https' --tlsv1.2 -o "$tmp/$asset" "$url/$asset"
 curl -fL --retry 3 --proto '=https' --tlsv1.2 -o "$tmp/SHA256SUMS" "$url/SHA256SUMS"
-grep -E "^[0-9a-f]{64}  $asset$$" "$tmp/SHA256SUMS" > "$tmp/checksums"
+grep -E "^[0-9a-f]{64}  ${asset}$" "$tmp/SHA256SUMS" > "$tmp/checksums"
 [[ $(wc -l < "$tmp/checksums") -eq 1 ]] || { echo "Release checksum is missing or duplicated." >&2; exit 1; }
 (cd "$tmp" && sha256sum --check checksums)
 [[ "$(tar -tzf "$tmp/$asset")" == pconn ]] || { echo "Release archive has unexpected contents." >&2; exit 1; }
@@ -93,7 +93,7 @@ if [[ "$action" == install ]]; then
     [[ -t 0 ]] || { echo "Interactive terminal required to create administrator credentials." >&2; exit 1; }
     read -r -s -p "Administrator password (16+ characters, letters/numbers/._@!+-): " secret
     printf '\n'
-    [[ ${#secret} -ge 16 && "$secret" =~ ^[a-zA-Z0-9._@!+-]+$$ ]] ||
+    [[ ${#secret} -ge 16 && "$secret" =~ ^[a-zA-Z0-9._@!+-]+$ ]] ||
       { echo "Invalid password. Installation aborted." >&2; exit 1; }
     printf 'PANEL_ADMIN_PASSWORD=%s\nPANEL_DATA_DIR=%s\nPANEL_PUBLIC_ORIGIN=http://127.0.0.1:4173\nGOMEMLIMIT=256MiB\n' \
       "$secret" "$data_dir" > "$env_file"
