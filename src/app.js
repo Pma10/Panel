@@ -55,7 +55,7 @@ const state = {
   level: "all", autoScroll: true, command: "", theme: getStore("pconn-theme", "light"),
   modal: null, paletteQuery: "", mobileMenu: false,
   startup: getStore("pconn-startup", { executable: "java", directory: "/srv/minecraft/main", memory: "10240", timeout: "30", arguments: "-Xms4G -Xmx10G -jar pma-paper.jar nogui", autoRestart: true }),
-  settings: getStore("pconn-settings", { panelName: "피컨", timezone: "Asia/Seoul", sessionHours: "24", retention: "7", audit: true })
+  settings: getStore("pconn-settings", { panelName: "Panel", timezone: "Asia/Seoul", sessionHours: "24", retention: "7", audit: true })
 };
 document.documentElement.dataset.theme = state.theme === "dark" ? "dark" : "light";
 let toastTimer = null, logClose = null, logRenderTimer = null;
@@ -78,7 +78,7 @@ const sectionNav = (section) => ROUTE_INFO.filter((item) => item.section === sec
 function renderSidebar() {
   const s = server();
   return `<aside class="sidebar ${state.mobileMenu ? "open" : ""}" id="sidebar" aria-label="탐색">
-    <div class="brand-block"><a class="brand" href="#/dashboard">피컨</a><span class="brand-description">서버 관리</span></div>
+    <div class="brand-block"><a class="brand" href="#/dashboard">Panel</a><span class="brand-description">서버 관리</span></div>
     <div class="side-caption">작업 공간</div><nav class="nav-group">${sectionNav("workspace")}</nav>
     <hr class="side-rule" /><div class="side-caption">현재 서버</div>
     <button class="server-selector" data-action="server-switcher" aria-label="현재 서버 변경">
@@ -94,8 +94,8 @@ function renderSidebar() {
 function renderChrome() {
   return `<div class="mobile-overlay ${state.mobileMenu ? "open" : ""}" data-action="close-menu"></div>
     <header class="mobile-top"><button class="icon-button" data-action="open-menu" aria-label="메뉴 열기">${icon("menu")}</button>
-      <a class="brand" href="#/dashboard">피컨</a><span class="demo-ribbon">${state.mode === "demo" ? "예시 모드" : "API 연결"}</span></header>
-    <header class="topbar"><div class="crumbs"><a href="#/dashboard">피컨</a><span>/</span><span class="current">${h(routeTitle())}</span></div>
+      <a class="brand" href="#/dashboard">Panel</a><span class="demo-ribbon">${state.mode === "demo" ? "예시 모드" : "API 연결"}</span></header>
+    <header class="topbar"><div class="crumbs"><a href="#/dashboard">Panel</a><span>/</span><span class="current">${h(routeTitle())}</span></div>
       <div class="top-actions"><span class="demo-ribbon">${state.mode === "demo" ? "예시 데이터" : "실제 API"}</span>
       <button class="global-search" data-action="palette" aria-label="기능 검색">${icon("search", "small")}<span>기능 검색</span><kbd class="keycap">⌘ K</kbd></button>
       <button class="icon-button" data-action="show-notifications" aria-label="알림">${icon("bell")}</button><span class="top-avatar" title="${state.mode==="demo"?"예시 계정":"연결된 계정"}">P</span></div>
@@ -663,7 +663,7 @@ function paletteItems() {
     ${icon(item.icon)}<span>${h(item.label)}</span>${icon("arrow","small")}</button>`).join("");
 }
 function renderLogin() {
-  return '<main class="login-screen"><div class="login-brand"><strong>피컨</strong><small>마인크래프트 서버 관리</small></div>' +
+  return '<main class="login-screen"><div class="login-brand"><strong>Panel</strong><small>마인크래프트 서버 관리</small></div>' +
     '<form class="login-card" id="login-form" autocomplete="on">' +
       '<h1>관리자 로그인</h1><p>관리 패널에 접근하려면 비밀번호를 입력하세요.</p>' +
       '<div class="form-group"><label for="admin-password">관리자 비밀번호</label>' +
@@ -690,7 +690,7 @@ async function bootstrapAuth() {
   }
 }
 function render() {
-  document.title = routeTitle() + " · 피컨";
+  document.title = routeTitle() + " · Panel";
   const app = $("#app");
   if (!app) return;
   if (apiEnabled && !state.authenticated) {
@@ -708,7 +708,7 @@ function render() {
   } else content = renderPage();
   app.innerHTML = `<div class="app-shell">${renderSidebar()}<div class="main-shell">${renderChrome()}
     <main class="page ${state.route==="console"?"console-page":""}" id="main-content">${content}
-      ${state.route!=="console"?`<div class="footer">피컨 · ${state.mode==="demo"?"프런트엔드 시연":"서버 관리"} · <a href="https://github.com/Pma10/Panel" target="_blank" rel="noopener noreferrer">GitHub</a></div>`:""}
+      ${state.route!=="console"?`<div class="footer">Panel · ${state.mode==="demo"?"프런트엔드 시연":"서버 관리"} · <a href="https://github.com/Pma10/Panel" target="_blank" rel="noopener noreferrer">GitHub</a></div>`:""}
     </main></div></div><div id="modal-root">${modalBody()}</div><div id="toast-root" aria-live="polite"></div>`;
   if (state.route === "console") scrollLogs();
   if (state.route === "servers") filterServerRows();
@@ -1312,7 +1312,7 @@ document.addEventListener("submit",async(event) => {
   }
   if(form.id==="settings-form"){
     const d=new FormData(form);
-    const values={panelName:String(d.get("panelName")||"피컨"),timezone:String(d.get("timezone")||"Asia/Seoul"),
+    const values={panelName:String(d.get("panelName")||"Panel"),timezone:String(d.get("timezone")||"Asia/Seoul"),
       sessionHours:String(d.get("sessionHours")||"24"),retention:String(d.get("retention")||"7"),audit:state.settings.audit};
     state.settings=values;store("pconn-settings",values);toast("화면 미리보기 설정을 브라우저에 저장했습니다. 서버 정책은 변경되지 않았습니다.");return;
   }
