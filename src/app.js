@@ -856,7 +856,7 @@ async function performPowerAction() {
     render(); return;
   }
   try {
-    await apiRequest("/servers/"+encodeURIComponent(s.id)+"/actions/"+action,{method:"POST"});
+    await apiRequest("/servers/"+encodeURIComponent(s.id)+"/actions/"+action,{method:"POST",timeoutMs:action==="restart"?50000:20000});
     toast("서버 작업 요청이 접수되었습니다."); await loadFromApi();
   } catch (error) { toast(error.message); }
 }
