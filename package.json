@@ -1,0 +1,14 @@
+{
+  "name": "pconn-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Korean Minecraft operations UI built from PConn Unslop design",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "start": "node scripts/serve.mjs",
+    "check": "node --check src/app.js && node --check src/data.js && node --check src/utils.mjs",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=20" }
+}
