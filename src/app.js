@@ -60,6 +60,7 @@ const state = {
 document.documentElement.dataset.theme = state.theme === "dark" ? "dark" : "light";
 let toastTimer = null, logClose = null, logRenderTimer = null;
 let logFetchVersion = 0, loadVersion = 0, commandPending = false;
+let statusRefreshTimer=null, statusPolling=false;
 const LOG_FLUSH_MS = 130;
 const SERVER_PAGE_SIZE = 60;
 const server = () => state.servers.find((s) => s.id === state.selectedId) || state.servers[0] || null;
@@ -622,7 +623,7 @@ async function bootstrapAuth() {
   } finally {
     state.authLoading=false;
     render();
-    if(state.authenticated) await loadFromApi();
+    if(state.authenticated){startPolling();await loadFromApi();}
   }
 }
 function render() {
@@ -865,6 +866,44 @@ async function switchSelectedServer(id,destination="overview") {
     connectLogStream();
   }
 }
+function normalizeLiveServer(it){
+  return {...it,
+    status:it.status||"unknown",
+    players:it.players==null?null:Number(it.players),
+    maxPlayers:it.maxPlayers==null?null:Number(it.maxPlayers),
+    memoryGb:it.memoryGb==null?null:(Number(it.memoryGb)||0),
+    memoryLimitGb:Number(it.memoryLimitGb)||Number(it.memoryMb||2048)/1024,
+    cpu:it.cpu==null?null:Number(it.cpu),
+    directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—",
+    tps:it.tps==null?null:(Number.isFinite(Number(it.tps))?Number(it.tps):null),
+    mspt:it.mspt==null?null:(Number.isFinite(Number(it.mspt))?Number(it.mspt):null)
+  };
+}
+async function pollLiveStatus(){
+  if(!apiEnabled || !state.authenticated || statusPolling || state.loading || document.hidden)return;
+  if(!["dashboard","servers","overview"].includes(state.route))return;
+  statusPolling=true;
+  try{
+    const result=await apiRequest("/servers");
+    const items=Array.isArray(result)?result:result.servers;
+    if(!Array.isArray(items))return;
+    state.servers=items.filter(x=>x&&typeof x.id==="string"&&typeof x.name==="string").map(normalizeLiveServer);
+    if(["dashboard","overview"].includes(state.route) ||
+       (state.route==="servers" && !["server-search","server-status"].includes(document.activeElement?.id))){
+      render();
+    }
+  }catch(e){if(e?.status!==401)state.apiError=e.message;}
+  finally{statusPolling=false;}
+}
+function startPolling(){
+  if(statusRefreshTimer!==null)return;
+  statusRefreshTimer=setInterval(()=>pollLiveStatus(),15000);
+}
+function stopPolling(){
+  if(statusRefreshTimer!==null)clearInterval(statusRefreshTimer);
+  statusRefreshTimer=null;
+}
+
 async function loadFromApi() {
   if (!apiEnabled) return;
   const version = ++loadVersion;
@@ -883,12 +922,7 @@ async function loadFromApi() {
     if (version !== loadVersion) return;
     const items = Array.isArray(value) ? value : value?.servers;
     if (!Array.isArray(items)) throw new Error("서버 응답 형식이 올바르지 않습니다.");
-    state.servers = items.filter((it) => it && typeof it.id === "string" && typeof it.name === "string")
-      .map((it) => ({...it,status:it.status||"unknown",players:it.players==null?null:Number(it.players),maxPlayers:it.maxPlayers==null?null:Number(it.maxPlayers),
-        memoryGb:it.memoryGb==null?null:(Number(it.memoryGb)||0),memoryLimitGb:Number(it.memoryLimitGb)||Number(it.memoryMb||2048)/1024,cpu:it.cpu==null?null:Number(it.cpu),
-        directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—",
-        tps:it.tps==null?null:(Number.isFinite(Number(it.tps))?Number(it.tps):null),
-        mspt:it.mspt==null?null:(Number.isFinite(Number(it.mspt))?Number(it.mspt):null)}));
+    state.servers = items.filter((it) => it && typeof it.id==="string" && typeof it.name==="string").map(normalizeLiveServer);
     if (!state.servers.some((s) => s.id === state.selectedId)) state.selectedId = state.servers[0]?.id || "";
     if (state.selectedId) await loadSelectedLogs();
   } catch (error) {
@@ -1063,7 +1097,7 @@ document.addEventListener("click",async(event) => {
   if (action==="logout"){
     try{await signOut();}catch(e){toast(e.message);}
     if(logClose){logClose();logClose=null;}
-    state.authenticated=false;state.authError="";state.logs=[];state.servers=[];render();return;
+    stopPolling();state.authenticated=false;state.authError="";state.logs=[];state.servers=[];render();return;
   }
   if (["network-add","user-invite"].includes(action)){mockActionMessage(action);return;}
   if (action==="log-level"){
@@ -1083,7 +1117,7 @@ document.addEventListener("submit",async(event) => {
     event.preventDefault();
     const password=String(new FormData(form).get("password")||"");
     const submit=form.querySelector('[type="submit"]');if(submit)submit.disabled=true;
-    try{const session=await signIn(password);state.authenticated=true;state.authError="";state.username=session.username||"관리자";await loadFromApi();}
+    try{const session=await signIn(password);state.authenticated=true;state.authError="";state.username=session.username||"관리자";startPolling();await loadFromApi();}
     catch(e){state.authError=e.message;render();}
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
@@ -1163,14 +1197,14 @@ document.addEventListener("submit",async(event) => {
 render();
 window.addEventListener("pconn-session-expired",()=>{
   if(!apiEnabled)return;
-  state.authenticated=false;
+  stopPolling();state.authenticated=false;
   state.authError="세션이 만료됐습니다. 다시 로그인하세요.";
   state.servers=[];state.logs=[];
   if(logClose){logClose();logClose=null;}
   cancelLogUpdate();render();
 });
 window.addEventListener("pagehide", () => {
-  cancelLogUpdate();
+  stopPolling();cancelLogUpdate();
   if (logClose) { logClose(); logClose = null; }
   clearTimeout(toastTimer);
 });
