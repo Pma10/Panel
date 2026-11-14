@@ -358,3 +358,35 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
   .server-pagination { padding: 12px; gap: 8px; flex-wrap: wrap; }
   .pagination-buttons { margin-left: auto; }
 }
+
+/* Real operation screens: low-decoration native form controls. */
+.login-screen {
+  min-height: 100dvh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:35px 20px;background:var(--bg);gap:32px;
+}
+.login-brand {display:flex;flex-direction:column;align-items:center;gap:5px;}
+.login-brand strong {font-size:29px;font-weight:650;letter-spacing:-.06em;}
+.login-brand small {color:var(--secondary);font-size:12px;}
+.login-card {width:min(100%,460px);background:var(--paper);border:1px solid var(--border);
+  border-radius:17px;padding:42px 36px;display:grid;gap:20px;box-shadow:0 15px 55px #12233c09;}
+.login-card h1 {font-size:24px;font-weight:650;letter-spacing:-.035em;margin:0;}
+.login-card > p {font-size:13px;color:var(--secondary);margin:-13px 0 10px;line-height:1.6;}
+.login-card .field {width:100%;min-height:45px;}
+.login-submit {margin-top:6px;min-height:45px;width:100%;}
+.login-error {color:var(--danger);background:var(--danger-soft);padding:12px;border-radius:8px;font-size:12px;}
+.login-footnote {font-size:11px;color:var(--muted);line-height:1.7;text-align:center;}
+.hint {font-size:12px;color:var(--secondary);line-height:1.7;margin:16px 0 0;}
+.file-actions {display:flex;flex-direction:column;gap:10px;margin-top:25px;}
+.file-actions .btn {width:100%;}
+.file-edit-dialog {width:min(92vw,800px);}
+.file-editor {display:block;width:100%;min-height:340px;max-height:63vh;resize:vertical;
+  padding:17px;background:var(--field);color:var(--ink);border:1px solid var(--border);
+  border-radius:9px;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;
+  tab-size:2;overflow:auto;}
+.file-editor:focus {outline:2px solid var(--accent);outline-offset:1px;}
+@media(max-width:760px) {
+  .login-card {padding:30px 22px;}
+  .login-card h1 {font-size:22px;}
+  .file-edit-dialog {max-height:91dvh;overflow:auto;}
+  .file-editor {min-height:260px;}
+}
