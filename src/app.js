@@ -340,7 +340,8 @@ function renderLiveBackups(){
     card("백업 목록",'<div class="info-list">'+(list.map(b=>
       '<div class="info-line"><div><strong>'+h(b.id)+'</strong><p>'+h(new Date(b.createdAt).toLocaleString("ko-KR"))+
       ' · '+h(b.files)+'개 파일</p></div><span class="right">'+fileSize(b.size)+'</span>'+
-      button("복원","backup-restore","small",'data-id="'+h(b.id)+'" '+(stopped?'':'disabled'))+'</div>').join("")||
+      button("복원","backup-restore","small",'data-id="'+h(b.id)+'" '+(stopped?'':'disabled'))+
+      button("삭제","backup-delete","danger",'data-id="'+h(b.id)+'"')+'</div>').join("")||
       '<div class="empty-state"><strong>백업이 없습니다.</strong><p>새 백업을 생성해 보세요.</p></div>')+'</div>')+
     '<div class="notice">백업 생성과 복원은 서버가 중지된 상태에서만 가능합니다. 예약 백업은 자동으로 서버를 중지·재시작하므로 접속 중단이 발생할 수 있습니다.</div>';
 }
@@ -1125,6 +1126,20 @@ document.addEventListener("click",async(event) => {
       description:"백업 #"+id+"으로 복원하면 현재 월드 데이터가 바뀔 수 있습니다. 복원 전에 별도 백업을 권장합니다.",
       id,confirmLabel:"복원",confirmAction:"restore-run",danger:true});return;}
   if (action==="restore-run"){await restoreBackup();return;}
+  if (action==="backup-delete"){
+    const id=target.dataset.id;
+    setModal({kind:"confirm",title:"백업을 영구 삭제할까요?",
+      description:"백업 #"+id+"의 파일을 삭제합니다. 삭제 후에는 이 백업으로 복원할 수 없습니다.",
+      id,confirmLabel:"백업 삭제",confirmAction:"backup-delete-run",danger:true});return;
+  }
+  if (action==="backup-delete-run"){
+    const id=state.modal?.id;setModal(null);if(!id)return;
+    try{
+      await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups/"+encodeURIComponent(id),{method:"DELETE"});
+      toast("백업을 삭제했습니다.");await refreshRouteData();
+    }catch(e){toast(e.message);}
+    return;
+  }
   if (action==="audit-export"){
     const rows=state.mode==="demo"?DEMO_AUDIT.map(x=>[x.time,x.action,x.actor,x.target].join(" | ")):
       (state.audit||[]).map(x=>[x.time,x.action,x.serverId||"패널"].join(" | "));
