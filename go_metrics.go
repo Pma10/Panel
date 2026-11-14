@@ -122,7 +122,11 @@ func (m *manager)pollStatuses(){
    rss,exists:=linuxRSS(x.pid)
    m.mu.Lock()
    if state:=m.servers[x.id];state!=nil&&state.process==x.process {
-    if err==nil{state.mcStatus=result;state.process.state="running"}else{state.mcStatus=nil}
+    if err==nil{
+     state.mcStatus=result
+     // A successful ping must never undo an operator-requested stop.
+     if state.process.state=="starting"{state.process.state="running"}
+    }else{state.mcStatus=nil}
     state.memoryGB=rss;state.memoryValid=exists
    }
    m.mu.Unlock()
