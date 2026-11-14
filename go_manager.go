@@ -9,6 +9,7 @@ import (
  "errors"
  "fmt"
  "io"
+ "log"
  "os"
  "os/exec"
  "net"
@@ -450,6 +451,10 @@ func (m *manager) shutdown(ctx context.Context)error{
  ids:=[]string{}
  for id,s:=range m.servers{if s.process!=nil{ids=append(ids,id)}}
  m.mu.Unlock()
+ if err:=m.saveResumeList(ids);err!=nil{
+  // Never silently claim the running servers can be resumed on the next start.
+  log.Printf("Warning: failed to persist running-server resume state: %v",err)
+ }
  for _,id:=range ids{_ = m.stop(id)}
  ticker:=time.NewTicker(100*time.Millisecond);defer ticker.Stop()
  for{
