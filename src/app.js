@@ -50,7 +50,7 @@ const state = {
   loading: apiEnabled, apiError: "", logError: "", logLoading: false,
   authenticated: !apiEnabled, authLoading: apiEnabled, authError: "", username:"관리자",
   query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: apiEnabled?"":"/home/minecraft/server", selectedFile: "",
-  fileEntries: [], fileLoading:false, fileText:"", backups:[], backupLoading:false,
+  fileEntries: [], fileLoading:false, fileText:"", backups:[], backupLoading:false, viewRequest:0, viewError:"",
   network:[], startupLive:null, health:null,
   level: "all", autoScroll: true, command: "", theme: getStore("pconn-theme", "light"),
   modal: null, paletteQuery: "", mobileMenu: false,
@@ -218,8 +218,61 @@ function renderUnconnected(title, details) {
       '<p>이 화면은 연결된 서버에서 정보를 가져오는 기능이 준비되면 사용할 수 있습니다. 임의의 예시 값을 실제 운영 정보로 표시하지 않습니다.</p>' +
     '</section>';
 }
+
+const fileSize = (bytes) => {
+  if(typeof bytes !== "number" || !Number.isFinite(bytes)) return "—";
+  if(bytes<1024)return bytes+" B";
+  if(bytes<1024*1024)return (bytes/1024).toFixed(1)+" KB";
+  if(bytes<1024*1024*1024)return (bytes/(1024*1024)).toFixed(1)+" MB";
+  return (bytes/(1024*1024*1024)).toFixed(2)+" GB";
+};
+const relativeFile = (name) => (state.filePath?state.filePath+"/":"")+name;
+async function loadFiles(){
+  if(state.mode!=="live" || !state.selectedId)return;
+  const id=state.selectedId,folder=state.filePath,seq=++state.viewRequest;
+  state.fileLoading=true;state.viewError="";if(state.route==="files")render();
+  try{
+    const result=await apiRequest("/servers/"+encodeURIComponent(id)+"/files?path="+encodeURIComponent(folder));
+    if(seq!==state.viewRequest || state.selectedId!==id || state.filePath!==folder)return;
+    state.fileEntries=Array.isArray(result.entries)?result.entries:[];
+  }catch(e){if(seq===state.viewRequest){state.viewError=e.message;state.fileEntries=[];}}
+  finally{if(seq===state.viewRequest){state.fileLoading=false;if(state.route==="files")render();}}
+}
+function renderLiveFiles(){
+  const entries=state.fileEntries.slice(0,250);
+  const active=state.fileEntries.find(f=>f.name===state.selectedFile);
+  const running=server()?.status!=="stopped";
+  const bar='<div class="toolbar"><div class="crumb-path"><button data-action="file-root">서버 루트</button>'+
+    (state.filePath?' / '+h(state.filePath):'')+'</div><div class="toolbar-spacer"></div>'+
+    button("새 폴더","file-new-folder","",running?'disabled':'')+
+    button(icon("upload","small")+" 파일 업로드","file-upload","primary",running?'disabled':'')+
+    '<input id="file-upload-input" type="file" hidden></div>';
+  const rows=entries.map(f=>'<tr class="file-row '+(state.selectedFile===f.name?'active':'')+'" data-action="file-select" data-name="'+h(f.name)+'">'+
+    '<td><span class="file-name">'+icon(f.type==="folder"?"folder":"file")+'<span>'+h(f.name)+'</span></span></td>'+
+    '<td>'+h(f.type==="folder"?"폴더":"파일")+'</td><td class="numeric">'+fileSize(f.size)+'</td>'+
+    '<td class="numeric">'+h(new Date(f.modified).toLocaleDateString("ko-KR"))+'</td></tr>').join("");
+  const nameAttr = active?'data-name="'+h(active.name)+'"':'';
+  const inspector=active?'<dl><dt>유형</dt><dd>'+h(active.type==="folder"?"폴더":"파일")+'</dd><dt>크기</dt><dd>'+fileSize(active.size)+'</dd>'+
+    '<dt>수정</dt><dd>'+h(new Date(active.modified).toLocaleString("ko-KR"))+'</dd></dl><div class="file-actions">'+
+    button(active.type==="folder"?"폴더 열기":"미리보기",active.type==="folder"?"file-open":"file-preview","",nameAttr)+
+    (active.type==="file"?button("다운로드","file-download","",nameAttr):"")+
+    button("이름 변경","file-rename","",nameAttr+(running?' disabled':''))+
+    button("삭제","file-delete","danger",nameAttr+(running?' disabled':''))+
+    '</div>':'<p class="hint">항목을 선택하면 파일 작업이 표시됩니다.</p>';
+  return header("파일","실제 서버 파일 시스템 · 서버 폴더 내부만 접근할 수 있습니다")+
+    bar+
+    (running?'<div class="notice">파일 수정 및 업로드는 서버를 중지한 상태에서만 가능합니다.</div>':'')+
+    (state.viewError?'<div class="notice">'+h(state.viewError)+'</div>':'')+
+    (state.fileLoading?'<div class="card empty-state"><strong>파일 목록을 불러오는 중입니다</strong></div>':
+     '<div class="file-layout">'+card("파일 목록",'<div class="table-scroll"><table class="data-table"><thead><tr><th>이름</th><th>유형</th><th class="numeric">크기</th><th class="numeric">수정</th></tr></thead><tbody>'+
+        (rows||'<tr><td colspan="4" class="empty-state">이 폴더는 비어 있습니다.</td></tr>')+
+        '</tbody></table></div>')+
+     '<aside class="card file-inspector"><h3>'+h(active?.name||"선택한 파일")+'</h3>'+inspector+'</aside></div>')+
+     (state.fileEntries.length>250?'<p class="hint">처음 250개 항목만 표시합니다. 항목이 많은 폴더는 서버에서 별도 정리가 필요합니다.</p>':'');
+}
+
 function renderFiles() {
-  if (state.mode === "live") return renderUnconnected("파일", "파일 목록 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveFiles();
   const viewingRoot = state.filePath === "/home/minecraft/server";
   const files = viewingRoot ? DEMO_FILES : [];
   const active = files.find((item) => item.name === state.selectedFile);
