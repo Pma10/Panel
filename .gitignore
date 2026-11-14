@@ -5,3 +5,6 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Managed server worlds, admin sessions and backup snapshots
+.panel-data/
