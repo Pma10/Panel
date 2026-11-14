@@ -117,6 +117,7 @@ func (m *manager) saveLocked()error{
 func (m *manager) describe(s *managedServer)map[string]any{
  state,uptime:="stopped","—"
  if s.process!=nil{state=s.process.state;uptime=fmt.Sprintf("%d초",int(time.Since(s.process.started).Seconds()))}
+ if s.process==nil&&orphanJavaRunning(m.dir(s.cfg.ID)){state="unmanaged"}
  var players,maxPlayers,mem any
  version:=s.cfg.InstalledVersion
  if s.mcStatus!=nil&&time.Since(s.mcStatus.CheckedAt)<60*time.Second{
