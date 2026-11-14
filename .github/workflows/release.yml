@@ -19,6 +19,7 @@ jobs:
           go-version-file: go.mod
           cache: false
       - run: gofmt -w *.go
+      - run: bash -n scripts/pconnctl-linux.sh scripts/verify-go.sh
       - run: go vet ./...
       - run: go test -race -count=1 -timeout=180s ./...
 
