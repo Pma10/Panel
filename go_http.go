@@ -8,6 +8,7 @@ import (
  "log"
  "mime"
  "net/http"
+ "os"
  "path"
  "path/filepath"
  "strings"
@@ -36,6 +37,9 @@ func jsonReply(w http.ResponseWriter,status int,value any){
 func apiFail(w http.ResponseWriter,err error){
  var api apiError
  if errors.As(err,&api){jsonReply(w,api.Status,map[string]string{"message":api.Message});return}
+ if errors.Is(err,os.ErrNotExist){jsonReply(w,404,map[string]string{"message":"요청한 파일 또는 폴더가 없습니다."});return}
+ if errors.Is(err,os.ErrExist){jsonReply(w,409,map[string]string{"message":"같은 이름의 파일 또는 폴더가 이미 존재합니다."});return}
+ if errors.Is(err,os.ErrPermission){jsonReply(w,403,map[string]string{"message":"파일에 접근할 권한이 없습니다."});return}
  log.Printf("API error: %v",err)
  jsonReply(w,500,map[string]string{"message":"요청 처리 중 오류가 발생했습니다."})
 }
