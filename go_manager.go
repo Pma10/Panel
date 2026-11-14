@@ -51,6 +51,7 @@ type managedProcess struct{
  state string
  started time.Time
  expectedStop bool
+ stdinMu sync.Mutex
 }
 type managedServer struct{
  cfg serverConfig
@@ -325,11 +326,21 @@ func (m *manager) command(id,raw string)error{
  if err!=nil{m.mu.Unlock();return err}
  p:=s.process
  if p==nil||p.state=="stopping"{m.mu.Unlock();return apiError{409,"서버가 실행 중이 아닙니다."}}
- stdin:=p.stdin
  m.mu.Unlock()
- _,err=io.WriteString(stdin,raw+"\n")
- if err!=nil{return apiError{409,"서버 콘솔에 전송할 수 없습니다."}}
- return nil
+ if !p.stdinMu.TryLock(){return apiError{429,"이전 콘솔 명령을 처리하는 중입니다."}}
+ done:=make(chan error,1)
+ go func(){
+  defer p.stdinMu.Unlock()
+  _,writeErr:=io.WriteString(p.stdin,raw+"\n")
+  done<-writeErr
+ }()
+ select{
+ case writeErr:=<-done:
+  if writeErr!=nil{return apiError{409,"서버 콘솔에 전송할 수 없습니다."}}
+  return nil
+ case <-time.After(3*time.Second):
+  return apiError{504,"서버 콘솔 입력이 지연되고 있습니다. 명령어가 나중에 전달될 수 있습니다."}
+ }
 }
 func (m *manager) stop(id string)error{
  m.mu.Lock();s,err:=m.get(id)
@@ -341,7 +352,11 @@ func (m *manager) stop(id string)error{
  }
  if p.state=="stopping"{m.mu.Unlock();return nil}
  p.state="stopping";p.expectedStop=true;m.mu.Unlock()
- _,_=io.WriteString(p.stdin,"stop\n")
+ go func(){
+  p.stdinMu.Lock()
+  defer p.stdinMu.Unlock()
+  _,_=io.WriteString(p.stdin,"stop\n")
+ }()
  go func(){
   select{case <-p.done:return;case <-time.After(25*time.Second):}
   if p.cmd.Process!=nil{p.cmd.Process.Kill()}
