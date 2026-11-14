@@ -8,6 +8,7 @@ import (
  "os/exec"
  "path/filepath"
  "syscall"
+ "sync"
 )
 
 // The kernel releases flock automatically if the panel crashes.
@@ -18,7 +19,8 @@ func lockPanelData(root string)(func(),error){
   file.Close()
   return nil,fmt.Errorf("another panel is managing this data folder: %w",err)
  }
- return func(){_ = syscall.Flock(int(file.Fd()),syscall.LOCK_UN);_ = file.Close()},nil
+ var once sync.Once
+ return func(){once.Do(func(){_ = syscall.Flock(int(file.Fd()),syscall.LOCK_UN);_ = file.Close()})},nil
 }
 
 // Signal JVMs when the parent dies unexpectedly and isolate their process group.
