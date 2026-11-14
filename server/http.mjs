@@ -58,6 +58,7 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
   await audit.init();
   const staticApp=createStaticServer(staticRoot);
   let clients=0;
+  const liveResponses=new Set();
   async function routes(req,res,path,query) {
     const method=req.method;
     if(path===API+"/auth/login"){
@@ -123,6 +124,7 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
       requireMethod(method,"GET");
       assert(clients<32,429,"실시간 콘솔 연결 수 한도를 초과했습니다.");
       clients++;
+      liveResponses.add(res);
       res.writeHead(200,{
         "Content-Type":"text/event-stream; charset=utf-8",
         "Cache-Control":"no-cache, no-transform",
@@ -132,7 +134,7 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
       });
       res.write(": connected\n\n");
       let ended=false;
-      const close=()=>{if(ended)return;ended=true;clients--;clearInterval(ping);unsubscribe();};
+      const close=()=>{if(ended)return;ended=true;clients--;liveResponses.delete(res);clearInterval(ping);unsubscribe();};
       const send=e=>{
         if(ended)return;
         if(!res.write("data: "+JSON.stringify(e)+"\n\n")){
@@ -141,7 +143,7 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
         }
       };
       const unsubscribe=manager.subscribe(id,send);
-      const ping=setInterval(()=>{if(!ended)res.write(": ping\n\n");},25000);
+      const ping=setInterval(()=>{if(!ended && !res.write(": ping\n\n")){close();res.destroy();}},25000);
       ping.unref();
       req.on("close",close);
       res.on("close",close);
@@ -247,6 +249,7 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
     staticApp.emit("request",req,res);
   });
   return {server:app,manager,auth,audit,close:async()=>{
+    for(const response of [...liveResponses]){try{response.end();}catch{}}
     await manager.close();
     await new Promise(resolve=>app.close(()=>resolve()));
   }};
