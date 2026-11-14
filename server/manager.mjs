@@ -7,6 +7,7 @@ import { resolve, join, basename, dirname, relative, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 import { HttpError, assert, stringValue, positiveInt, confinedPath, safeRelative } from "./security.mjs";
+import { pingMinecraft } from "./ping.mjs";
 
 const MAX_LOGS=1200, MAX_LOG_LENGTH=4096, MAX_UPLOAD=256*1024*1024;
 const MAX_BACKUP_BYTES=8*1024*1024*1024, MAX_FILES=100_000;
@@ -27,6 +28,7 @@ export class MinecraftManager {
     this.servers=new Map();this.active=new Map();this.logs=new Map();
     this.events=new EventEmitter();this.events.setMaxListeners(256);
     this.busy=new Set();this.stopped=false;this.scheduleTimer=null;
+    this.statuses=new Map();this.statusPollTimer=null;this.polling=false;
   }
   async init() {
     await mkdir(this.serversDir,{recursive:true,mode:0o700});
@@ -41,6 +43,7 @@ export class MinecraftManager {
       this.logs.set(item.id,[]);
     }
     this.startScheduler();
+    this.startStatusPolling();
   }
   get(id) {
     const s=this.servers.get(id);
@@ -67,6 +70,8 @@ export class MinecraftManager {
   async summary(item) {
     const child=this.active.get(item.id);
     const status=child ? child.status : "stopped";
+    const cached=this.statuses.get(item.id);
+    const probe=child && cached && Date.now()-cached.checkedAt<90000?cached:null;
     let memoryGb=null;
     if(child?.proc?.pid && process.platform==="linux"){
       try {
@@ -77,8 +82,9 @@ export class MinecraftManager {
     return {
       id:item.id,name:item.name,kind:"마인크래프트",status,
       memoryMb:item.memoryMb,memoryGb,
-      maxPlayers:null,players:null,tps:null,mspt:null,cpu:null,
-      port:item.port,version:item.jar,jar:item.jar,
+      maxPlayers:probe?.maxPlayers??null,players:probe?.players??null,tps:null,mspt:null,cpu:null,
+      latencyMs:probe?.latencyMs??null,joinable:Boolean(probe),
+      port:item.port,version:probe?.version??item.jar,jar:item.jar,
       directory:this.dir(item.id),uptime:child?.startedAt?
         Math.max(0,Math.floor((Date.now()-child.startedAt)/1000))+"초":"—",
       eulaAccepted:item.eulaAccepted
@@ -152,7 +158,7 @@ export class MinecraftManager {
     child.once("exit",(code,signal)=>{
       if(item.stopTimer)clearTimeout(item.stopTimer);
       if(item.killTimer)clearTimeout(item.killTimer);
-      this.active.delete(id);
+      this.active.delete(id);this.statuses.delete(id);
       this.pushLog(id,"INFO","Java 프로세스 종료: code="+code+" signal="+signal);
     });
     try {
@@ -216,6 +222,7 @@ export class MinecraftManager {
   async close() {
     this.stopped=true;
     if(this.scheduleTimer)clearInterval(this.scheduleTimer);
+    if(this.statusPollTimer)clearInterval(this.statusPollTimer);
     const ids=[...this.active.keys()];
     await Promise.all(ids.map(async id=>{
       try{await this.stop(id);await this.waitForStop(id);}
@@ -407,6 +414,30 @@ export class MinecraftManager {
     cfg.schedules=cfg.schedules.filter(s=>s.id!==sid);
     assert(cfg.schedules.length<count,404,"예약 작업을 찾을 수 없습니다.");
     await this.persist();return {deleted:true};
+  }
+  async refreshStatusCache(){
+    if(this.polling || this.stopped)return;
+    this.polling=true;
+    try{
+      const ids=[...this.active.keys()];
+      for(let i=0;i<ids.length;i+=4){
+        const group=ids.slice(i,i+4);
+        await Promise.all(group.map(async id=>{
+          const cfg=this.servers.get(id);
+          if(!cfg || !this.active.has(id))return;
+          const status=await pingMinecraft(cfg.port);
+          if(this.active.has(id)){
+            if(status)this.statuses.set(id,status);
+            else this.statuses.delete(id);
+          }
+        }));
+      }
+    }finally{this.polling=false;}
+  }
+  startStatusPolling(){
+    if(this.statusPollTimer)return;
+    this.statusPollTimer=setInterval(()=>this.refreshStatusCache().catch(()=>{}),15000);
+    this.statusPollTimer.unref();
   }
   startScheduler(){
     if(this.scheduleTimer)return;
