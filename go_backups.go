@@ -148,7 +148,11 @@ func (m *manager)restore(ctx context.Context,id,backupID string)(map[string]any,
  stage:=filepath.Join(m.root,"servers",id+"."+makeID()+".restore")
  previous:=filepath.Join(m.root,"servers",id+"."+makeID()+".previous")
  defer os.RemoveAll(stage)
- if _,_,err:=copySnapshot(ctx,origin,stage);err!=nil{return nil,err}
+ restoredBytes,restoredFiles,err:=copySnapshot(ctx,origin,stage)
+ if err!=nil{return nil,err}
+ if restoredBytes!=metadata.Size || restoredFiles!=metadata.Files{
+  return nil,apiError{409,"백업 파일 수 또는 크기가 원본 기록과 다릅니다. 현재 월드는 변경하지 않았습니다."}
+ }
  if err:=os.Rename(current,previous);err!=nil{return nil,err}
  if err:=os.Rename(stage,current);err!=nil{
   if rollback:=os.Rename(previous,current);rollback!=nil{
