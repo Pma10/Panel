@@ -69,7 +69,7 @@ if [[ -n "$local_binary" ]]; then
   [[ -f "$local_binary" && ! -L "$local_binary" ]] || { echo "Local Go binary does not exist or is a symlink." >&2; exit 1; }
   cp -- "$local_binary" "$tmp/pconn"
   chmod 0755 "$tmp/pconn"
-  "$tmp/pconn" --version | grep -Fq "pconn " || { echo "Not a pconn Go binary." >&2; exit 1; }
+  "$tmp/pconn" --version | grep -Fq "Panel " || { echo "Not a pconn Go binary." >&2; exit 1; }
 else
   [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]] || usage
   for command in curl sha256sum tar install; do
@@ -91,7 +91,7 @@ else
   [[ "$(tar -tzf "$tmp/$asset")" == pconn ]] || { echo "Release archive has unexpected contents." >&2; exit 1; }
   tar -xzf "$tmp/$asset" -C "$tmp" pconn
   chmod 0755 "$tmp/pconn"
-  "$tmp/pconn" --version | grep -Fq "pconn $tag " || { echo "Binary version does not match release." >&2; exit 1; }
+  "$tmp/pconn" --version | grep -Fq "Panel $tag " || { echo "Binary version does not match release." >&2; exit 1; }
 fi
 
 if [[ "$action" == install ]]; then
