@@ -231,9 +231,12 @@ func (m *manager) start(id string)(map[string]any,error){
  result:=m.describe(s)
  m.mu.Unlock()
  m.log(id,"INFO",fmt.Sprintf("Java 시작 PID %d",cmd.Process.Pid))
- go scanLines(stdout,func(line string){m.log(id,"INFO",line)})
- go scanLines(stderr,func(line string){m.log(id,"WARN",line)})
+ var pipes sync.WaitGroup
+ pipes.Add(2)
+ go func(){defer pipes.Done();scanLines(stdout,func(line string){m.log(id,"INFO",line)})}()
+ go func(){defer pipes.Done();scanLines(stderr,func(line string){m.log(id,"WARN",line)})}()
  go func(){
+  pipes.Wait()
   err:=cmd.Wait()
   stdin.Close()
   m.mu.Lock()
