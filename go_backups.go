@@ -174,8 +174,7 @@ func (m *manager)scheduleTick(now time.Time){
  local:=now.In(time.FixedZone("KST",9*3600))
  stamp:=local.Format("2006-01-02 15:04")
  minute,hour,day:=local.Minute(),local.Hour(),int(local.Weekday())
- type job struct{id string; action string}
- jobs:=[]job{}
+ jobs:=[]scheduledJob{}
  m.mu.Lock()
  if m.closing{m.mu.Unlock();return}
  for id,s:=range m.servers{
@@ -188,30 +187,16 @@ func (m *manager)scheduleTick(now time.Time){
     dd,err:=strconv.Atoi(fields[4]);if err!=nil||dd!=day{continue}
    }
    s.cfg.Schedules[index].LastRun=stamp
-   jobs=append(jobs,job{id,item.Type})
+   jobs=append(jobs,scheduledJob{id,item.Type})
   }
  }
  if len(jobs)>0{_ = m.saveLocked()}
  m.mu.Unlock()
  for _,work:=range jobs{
-  go func(job job){
-   ctx,cancel:=context.WithTimeout(context.Background(),15*time.Minute);defer cancel()
-   if job.action=="restart"{
-    _,err:=m.restart(job.id)
-    if err!=nil{m.log(job.id,"WARN","예약 재시작 실패: "+err.Error())}
-   }else{
-    // Cold backup: stop -> snapshot -> start. This causes a temporary outage.
-    m.mu.Lock();s,err:=m.get(job.id);var p *managedProcess
-    if err==nil{p=s.process}
-    m.mu.Unlock()
-    if p!=nil{
-     if err:=m.stop(job.id);err!=nil{m.log(job.id,"WARN",err.Error());return}
-     select{case <-p.done:case <-ctx.Done():m.log(job.id,"WARN","예약 백업 종료 시간 초과");return}
-    }
-    _,backupErr:=m.backup(ctx,job.id)
-    if backupErr!=nil{m.log(job.id,"WARN","예약 백업 실패: "+backupErr.Error())}
-    if p!=nil{if _,err:=m.start(job.id);err!=nil{m.log(job.id,"WARN","백업 후 재시작 실패: "+err.Error())}}
-   }
-  }(work)
+  select{
+  case m.jobQueue<-work:
+  default:
+   m.log(work.id,"WARN","예약 작업 대기열이 가득 찼습니다. 다음 실행 시간을 확인하세요.")
+  }
  }
 }
