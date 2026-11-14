@@ -1,9 +1,9 @@
 {
-  "name": "pconn-panel",
+  "name": "panel",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Korean Minecraft operations UI built from PConn Unslop design",
+  "description": "Lightweight Minecraft Java control panel powered by Go",
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
