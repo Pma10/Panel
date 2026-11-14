@@ -80,7 +80,7 @@ function renderSidebar() {
     <nav class="nav-group" style="margin-top:15px">${sectionNav("server")}</nav>
     <hr class="side-rule" /><div class="side-caption">관리</div>
     <nav class="nav-group">${sectionNav("admin")}</nav>
-    <div class="user-summary"><span class="avatar">P</span><span><strong>Pma</strong><small>소유자 · 미리보기</small></span></div>
+    <div class="user-summary"><span class="avatar">P</span><span><strong>${state.mode==="demo"?"Pma":"연결된 계정"}</strong><small>${state.mode==="demo"?"소유자 · 미리보기":"계정 API 미연결"}</small></span></div>
   </aside>`;
 }
 function renderChrome() {
@@ -90,7 +90,7 @@ function renderChrome() {
     <header class="topbar"><div class="crumbs"><a href="#/dashboard">피컨</a><span>/</span><span class="current">${h(routeTitle())}</span></div>
       <div class="top-actions"><span class="demo-ribbon">${state.mode === "demo" ? "예시 데이터" : "실제 API"}</span>
       <button class="global-search" data-action="palette" aria-label="기능 검색">${icon("search", "small")}<span>기능 검색</span><kbd class="keycap">⌘ K</kbd></button>
-      <button class="icon-button" data-action="show-notifications" aria-label="알림">${icon("bell")}</button><span class="top-avatar" title="Pma">P</span></div>
+      <button class="icon-button" data-action="show-notifications" aria-label="알림">${icon("bell")}</button><span class="top-avatar" title="${state.mode==="demo"?"예시 계정":"연결된 계정"}">P</span></div>
     </header>
     <nav class="mobile-tabbar" aria-label="모바일 주요 탐색">
       ${[["dashboard","대시보드","grid"],["servers","서버","server"],["console","콘솔","terminal"],["settings","설정","gear"]].map(([route,title,glyph]) =>
@@ -111,7 +111,7 @@ function renderServerRows(servers, withOpen = false) {
 }
 function renderDashboard() {
   const sum = serverSummary(state.servers);
-  const activities = state.activity.map((a) => `<div class="activity-row"><div class="activity-spot ${a.type === "ok" ? "ok" : ""}">${icon(a.type === "ok" ? "check" : "clock","small")}</div>
+  const activities = (state.mode === "demo" ? state.activity : []).map((a) => `<div class="activity-row"><div class="activity-spot ${a.type === "ok" ? "ok" : ""}">${icon(a.type === "ok" ? "check" : "clock","small")}</div>
      <div class="activity-info"><strong>${h(a.title)}</strong><small>${h(a.detail)}</small></div><time>${h(a.time)}</time></div>`).join("");
   return `${header("대시보드","서버 상태와 최근 작업",button(`${icon("plus","small")} 서버 추가`,"server-create","primary"))}
     <section class="card summary-strip" aria-label="운영 현황">
@@ -125,7 +125,7 @@ function renderDashboard() {
       ${card("내 서버",`<div class="table-scroll"><table class="data-table">
         <thead><tr><th>서버 이름</th><th>상태</th><th class="numeric">플레이어</th><th class="numeric">메모리</th></tr></thead>
         <tbody>${renderServerRows(state.servers)}</tbody></table></div>`,`<a href="#/servers">전체 서버 보기 →</a>`)}
-      ${card("최근 활동",`<div class="activity-list">${activities}</div>`,`<a href="#/audit">전체 보기</a>`)}
+      ${card("최근 활동",`<div class="activity-list">${activities || '<div class="empty-state"><strong>활동 내역 API 미연결</strong><p>실제 서버 활동 기록을 불러올 수 없습니다.</p></div>'}</div>`,state.mode==="demo"?`<a href="#/audit">전체 보기</a>`:"")}
     </div>${demoNote()}`;
 }
 function renderServers() {
@@ -204,7 +204,16 @@ function renderConsole() {
     <p class="console-help">${state.mode === "demo" ? "예시 모드: 입력한 명령은 실제 서버에 전송되지 않습니다." : "명령어는 현재 선택된 서버에 전송됩니다. 관리 권한이 있는 계정에서만 사용하세요."}</p></div>`;
 }
 
+function renderUnconnected(title, details) {
+  return header(title, details) +
+    '<section class="card empty-state">' +
+      icon("alert","large") +
+      '<strong>실제 데이터 API가 연결되지 않았습니다</strong>' +
+      '<p>이 화면은 연결된 서버에서 정보를 가져오는 기능이 준비되면 사용할 수 있습니다. 임의의 예시 값을 실제 운영 정보로 표시하지 않습니다.</p>' +
+    '</section>';
+}
 function renderFiles() {
+  if (state.mode === "live") return renderUnconnected("파일", "파일 목록 API 연결이 필요합니다");
   const viewingRoot = state.filePath === "/home/minecraft/server";
   const files = viewingRoot ? DEMO_FILES : [];
   const active = files.find((item) => item.name === state.selectedFile);
@@ -224,6 +233,7 @@ function renderFiles() {
     </aside></div>${demoNote()}`;
 }
 function renderBackups() {
+  if (state.mode === "live") return renderUnconnected("백업", "백업 조회·복원 API 연결이 필요합니다");
   const stats = [["복구 가능한 백업","8개","전체 백업 기록"],["전체 보관 크기","14.8 GB","백업 파일 합계"],["마지막 백업","3분 전","정상 완료"]];
   return `${header("백업","백업을 생성하고 원하는 시점으로 서버를 복구합니다",button(`${icon("plus","small")} 새 백업`,"backup-create","primary"))}
     <div class="grid-stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">${stats.map(([label,value,desc]) =>
@@ -240,6 +250,7 @@ function inputRow(name,label,value,type="text") {
     <input class="field" id="${h(name)}" name="${h(name)}" type="${type}" value="${h(value)}" autocomplete="off"></div>`;
 }
 function renderStartup() {
+  if (state.mode === "live") return renderUnconnected("시작 설정", "서버별 실행 설정 조회 API 연결이 필요합니다");
   const st = state.startup;
   return `${header("시작 설정","실행 파일과 시작 옵션을 변경합니다")}
   <form id="startup-form" class="stack">
@@ -258,6 +269,7 @@ function renderStartup() {
   </form>${demoNote()}`;
 }
 function renderNetwork() {
+  if (state.mode === "live") return renderUnconnected("네트워크", "포트 할당과 충돌 검사 API 연결이 필요합니다");
   const rows = [
     ["25565","TCP","마인크래프트 기본 접속 포트","사용 중"],
     ["8123","TCP","Dynmap 웹 접속 주소","사용 중"]
@@ -272,6 +284,7 @@ function renderNetwork() {
       ${button("다시 검사","health-check")}</div></div>`)}</div>${demoNote()}`;
 }
 function renderSchedules() {
+  if (state.mode === "live") return renderUnconnected("예약 작업", "예약 작업 조회 API 연결이 필요합니다");
   return `${header("예약 작업","백업과 유지보수 작업을 예약해 자동 실행합니다")}
     <div class="two-col" style="grid-template-columns:minmax(0,1.5fr) minmax(285px,1fr)">
       ${card("예약된 작업",`<div class="info-list">
@@ -288,6 +301,7 @@ function renderSchedules() {
         </div></form></div>${demoNote()}`;
 }
 function renderHealth() {
+  if (state.mode === "live") return renderUnconnected("상태 확인", "상태 감시 API 연결이 필요합니다");
   return `${header("상태 확인","프로세스와 자동 복구 정책을 확인합니다",button(`${icon("refresh","small")} 다시 검사`,"health-check"))}
     <section class="card overview-head"><span class="server-glyph" style="background:var(--success-soft);color:var(--success)">${icon("check","large")}</span>
       <div class="overview-title"><h2>모든 검사 정상</h2><p>마지막 검사 11초 전 · 상태 감시 사용 중 (예시)</p></div><span class="status running">정상</span></section>
@@ -300,6 +314,7 @@ function renderHealth() {
       </div>`)}${demoNote()}`;
 }
 function renderUsers() {
+  if (state.mode === "live") return renderUnconnected("사용자", "사용자 권한 API 연결이 필요합니다");
   return `${header("사용자","사용자와 서버별 권한을 확인합니다",button(`${icon("plus","small")} 사용자 초대`,"user-invite","primary"))}
     ${card("워크스페이스 사용자",`<div class="table-scroll"><table class="data-table"><thead><tr>
       <th>사용자</th><th>권한</th><th>접근 범위</th></tr></thead><tbody>
@@ -307,6 +322,7 @@ function renderUsers() {
       </tbody></table></div>`)}${demoNote()}`;
 }
 function renderAudit() {
+  if (state.mode === "live") return renderUnconnected("감사 로그", "감사 기록 API 연결이 필요합니다");
   return `${header("감사 로그","서버와 패널의 주요 작업 기록을 확인합니다",button(`${icon("download","small")} 내보내기`,"audit-export"))}
     ${card("최근 감사 기록",`<div class="table-scroll"><table class="data-table"><thead><tr>
       <th>시각</th><th>작업</th><th>사용자</th><th>대상</th></tr></thead><tbody>
@@ -316,7 +332,7 @@ function renderAudit() {
 }
 function renderSettings() {
   const st = state.settings;
-  return `${header("설정","패널 표시 환경과 기본 설정을 관리합니다")}
+  return `${header("설정","브라우저 화면 설정을 관리합니다. 서버 정책은 변경되지 않습니다")}
     <form id="settings-form" class="stack"><section class="card settings-card"><h2>기본 설정</h2>
       <div class="field-grid">
         ${inputRow("panelName","패널 이름",st.panelName)}
@@ -675,7 +691,7 @@ document.addEventListener("keydown",(event) => {
   }
 });
 document.addEventListener("input",(event) => {
-  if (event.target.id === "log-search") { state.query=event.target.value;updateLogRows(); }
+  if (event.target.id === "log-search") { state.query=event.target.value;scheduleLogUpdate(); }
   if (event.target.id === "server-search") { state.serverQuery=event.target.value;filterServerRows(); }
   if (event.target.id === "console-command") { state.command=event.target.value; }
   if (event.target.id === "palette-search") {
@@ -692,8 +708,12 @@ document.addEventListener("click",async(event) => {
   if (action==="navigate") {state.mobileMenu=false;return;}
   if (action==="modal-background" && event.target===target){setModal(null);return;}
   if (action==="modal-close"){setModal(null);return;}
-  if (action==="open-menu"){state.mobileMenu=true;render();return;}
-  if (action==="close-menu"){state.mobileMenu=false;render();return;}
+  if (action==="open-menu" || action==="close-menu"){
+    state.mobileMenu = action === "open-menu";
+    $("#sidebar")?.classList.toggle("open",state.mobileMenu);
+    $(".mobile-overlay")?.classList.toggle("open",state.mobileMenu);
+    return;
+  }
   if (action==="palette"){state.paletteQuery="";setModal({kind:"palette"});return;}
   if (action==="palette-navigate"){navigate(target.dataset.route);return;}
   if (action==="server-switcher"){setModal({kind:"switcher"});return;}
@@ -790,4 +810,9 @@ document.addEventListener("submit",async(event) => {
   }
 });
 render();
+window.addEventListener("pagehide", () => {
+  cancelLogUpdate();
+  if (logClose) { logClose(); logClose = null; }
+  clearTimeout(toastTimer);
+});
 if (apiEnabled) loadFromApi();
