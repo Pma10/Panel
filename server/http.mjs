@@ -5,6 +5,7 @@ import { resolve, extname } from "node:path";
 import { createStaticServer } from "../scripts/serve.mjs";
 import { createAuthenticator, HttpError, assert } from "./security.mjs";
 import { MinecraftManager } from "./manager.mjs";
+import { AuditLog } from "./audit.mjs";
 
 const API="/api/v1";
 const MIME={".jar":"application/java-archive",".json":"application/json",".yml":"text/plain",".yaml":"text/plain",".txt":"text/plain",".log":"text/plain"};
@@ -53,6 +54,8 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
   const auth=createAuthenticator(adminPassword,{origin,secure:secure??url.protocol==="https:"});
   const manager=new MinecraftManager({dataDir:root,javaBin});
   await manager.init();
+  const audit=new AuditLog(manager.root);
+  await audit.init();
   const staticApp=createStaticServer(staticRoot);
   let clients=0;
   async function routes(req,res,path,query) {
@@ -75,6 +78,10 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
       requireMethod(method,"POST");
       auth.clear(user.id);
       return json(res,200,{loggedOut:true},{"Set-Cookie":auth.clearCookie()});
+    }
+    if(path===API+"/audit"){
+      requireMethod(method,"GET");
+      return json(res,200,{entries:audit.list()});
     }
     if(path===API+"/servers"){
       if(method==="GET")return json(res,200,{servers:await manager.list()});
@@ -209,9 +216,18 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
   }
   const app=createServer(async(req,res)=>{
     for(const [k,v] of Object.entries(OPTIONS_BASE))res.setHeader(k,v);
-    const requestUrl=new URL(req.url||"/","http://localhost");
+    let requestUrl;
+    try{requestUrl=new URL(req.url||"/","http://localhost");}
+    catch{res.writeHead(400);res.end("Invalid URL");return;}
     if(requestUrl.pathname.startsWith(API)) {
-      try{await routes(req,res,requestUrl.pathname,requestUrl.searchParams);}
+      try{
+        await routes(req,res,requestUrl.pathname,requestUrl.searchParams);
+        if(!["GET","HEAD"].includes(req.method) && !requestUrl.pathname.includes("/auth/")){
+          const found=requestUrl.pathname.match(/^\/api\/v1\/servers\/([a-f0-9]{16})/);
+          audit.record({action:req.method+" "+requestUrl.pathname,serverId:found?.[1]||null})
+            .catch(error=>console.error("Audit log error:",error));
+        }
+      }
       catch(e){
         if(res.headersSent){res.destroy();return;}
         if(!(e instanceof HttpError))console.error("API request error:",e);
@@ -230,7 +246,7 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
     // Static assets are allowlisted in the existing static-file server.
     staticApp.emit("request",req,res);
   });
-  return {server:app,manager,auth,close:async()=>{
+  return {server:app,manager,auth,audit,close:async()=>{
     await manager.close();
     await new Promise(resolve=>app.close(()=>resolve()));
   }};
