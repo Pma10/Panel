@@ -101,3 +101,44 @@ test("late server responses are discarded after selecting another server",async(
   assert.equal(ui.state.selectedId,"pvpconnect");
   assert.deepEqual(Array.from(ui.state.logs,e=>e.message),["CURRENT"]);
 });
+
+test("server fleet pages keep table DOM below the configured page limit",()=>{
+  const ui=harness();
+  ui.state.servers=Array.from({length:2000},(_,i)=>({
+    id:"fleet-"+i,name:"Fleet "+i,kind:"Minecraft",status:"running",
+    players:0,maxPlayers:20,memoryGb:1
+  }));
+  ui.state.route="servers";
+  ui.render();
+  assert.equal((ui.appRoot.innerHTML.match(/data-server-row=/g)||[]).length,60);
+  ui.state.route="dashboard";
+  ui.render();
+  assert.equal((ui.appRoot.innerHTML.match(/data-server-row=/g)||[]).length,8);
+});
+
+test("live mode does not present fixture health, backups, or audit records as real",()=>{
+  const ui=harness({live:true});
+  ui.state.loading=false;
+  ui.state.mode="live";
+  for (const route of ["health","backups","audit","files","network","startup","schedules","users"]) {
+    ui.state.route=route;
+    ui.render();
+    assert.match(ui.appRoot.innerHTML,/실제 데이터 API가 연결되지 않았습니다/);
+  }
+  ui.state.route="health";
+  ui.render();
+  assert.doesNotMatch(ui.appRoot.innerHTML,/모든 검사 정상/);
+});
+
+test("invalid log levels and messages never become raw HTML attributes",()=>{
+  const ui=harness();
+  ui.state.logs=[];
+  appendBoundedLog(ui.state.logs,{
+    time:"22:00:00",level:'ERROR" autofocus',message:'<img src=x onerror="bad">'
+  });
+  ui.state.route="console";
+  ui.render();
+  assert.match(ui.appRoot.innerHTML,/class="log-line other"/);
+  assert.match(ui.appRoot.innerHTML,/&lt;img src=x onerror=&quot;bad&quot;&gt;/);
+  assert.doesNotMatch(ui.appRoot.innerHTML,/class="log-line error" autofocus/);
+});
