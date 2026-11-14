@@ -51,7 +51,7 @@ const state = {
   authenticated: !apiEnabled, authLoading: apiEnabled, authError: "", username:"관리자",
   query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: apiEnabled?"":"/home/minecraft/server", selectedFile: "",
   fileEntries: [], fileLoading:false, fileText:"", backups:[], backupLoading:false, viewRequest:0, viewError:"",
-  network:[], startupLive:null, health:null,
+  network:[], startupLive:null, health:null, audit:[], viewLoading:false,
   level: "all", autoScroll: true, command: "", theme: getStore("pconn-theme", "light"),
   modal: null, paletteQuery: "", mobileMenu: false,
   startup: getStore("pconn-startup", { executable: "java", directory: "/srv/minecraft/main", memory: "10240", timeout: "30", arguments: "-Xms4G -Xmx10G -jar pma-paper.jar nogui", autoRestart: true }),
@@ -291,8 +291,119 @@ function renderFiles() {
         `<p style="color:var(--secondary);line-height:1.7">목록에서 파일을 선택하면 세부 정보와 작업 메뉴가 표시됩니다.</p>`}
     </aside></div>${demoNote()}`;
 }
+
+async function refreshRouteData(){
+  if(state.mode!=="live" || !state.authenticated || !state.selectedId)return;
+  if(state.route==="files"){await loadFiles();return;}
+  const route=state.route;
+  const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit"};
+  if(!endpoints[route])return;
+  const id=state.selectedId,seq=++state.viewRequest;
+  state.viewError="";state.viewLoading=true;render();
+  try{
+    const path=route==="audit"?"/audit":"/servers/"+encodeURIComponent(id)+"/"+endpoints[route];
+    const response=await apiRequest(path);
+    if(seq!==state.viewRequest || id!==state.selectedId || route!==state.route)return;
+    if(route==="backups")state.backups=Array.isArray(response.backups)?response.backups:[];
+    if(route==="startup")state.startupLive=response;
+    if(route==="network")state.network=Array.isArray(response.ports)?response.ports:[];
+    if(route==="schedules")state.schedules=Array.isArray(response.schedules)?response.schedules:[];
+    if(route==="health")state.health=response;
+    if(route==="audit")state.audit=Array.isArray(response.entries)?response.entries:[];
+  }catch(e){if(seq===state.viewRequest)state.viewError=e.message;}
+  finally{if(seq===state.viewRequest){state.viewLoading=false;if(route===state.route)render();}}
+}
+function liveViewStatus(){
+  if(state.viewLoading)return '<div class="card empty-state"><strong>정보를 불러오는 중입니다.</strong></div>';
+  return state.viewError?'<div class="notice" role="alert">'+h(state.viewError)+'</div>':'';
+}
+function renderLiveBackups(){
+  const list=state.backups;
+  const stopped=server()?.status==="stopped";
+  const total=list.reduce((sum,x)=>sum+(Number(x.size)||0),0);
+  return header("백업","서버 월드와 파일을 실제 폴더 스냅샷으로 보관합니다",
+    button(icon("plus","small")+" 새 백업","backup-create","primary"))+
+    liveViewStatus()+
+    '<div class="grid-stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+
+      '<div class="card stat-card"><span>백업 개수</span><strong>'+list.length+'</strong></div>'+
+      '<div class="card stat-card"><span>총 백업 크기</span><strong>'+fileSize(total)+'</strong></div></div>'+
+    card("백업 목록",'<div class="info-list">'+(list.map(b=>
+      '<div class="info-line"><div><strong>'+h(b.id)+'</strong><p>'+h(new Date(b.createdAt).toLocaleString("ko-KR"))+
+      ' · '+h(b.files)+'개 파일</p></div><span class="right">'+fileSize(b.size)+'</span>'+
+      button("복원","backup-restore","small",'data-id="'+h(b.id)+'" '+(stopped?'':'disabled'))+'</div>').join("")||
+      '<div class="empty-state"><strong>백업이 없습니다.</strong><p>새 백업을 생성해 보세요.</p></div>')+'</div>')+
+    '<div class="notice">복원은 서버를 중지한 후 가능합니다. 복원할 때 현재 파일이 변경되므로 중요한 데이터는 별도 보관하세요.</div>';
+}
+function renderLiveStartup(){
+  const st=state.startupLive;
+  return header("시작 설정","Java 실행 메모리, 서버 JAR, EULA 동의 설정")+liveViewStatus()+
+    (!st?'<div class="card empty-state">서버 설정을 불러올 수 없습니다.</div>':
+      '<form id="startup-form" class="stack">'+
+      '<section class="card settings-card"><h2>실제 서버 설정</h2><div class="field-grid">'+
+      inputRow("live-name","서버 이름",st.name)+
+      inputRow("live-memory","최대 메모리 (MiB)",st.memoryMb,"number")+
+      inputRow("live-jar","실행 JAR 이름",st.jar)+
+      inputRow("live-port","접속 포트 (읽기 전용)",st.port,"number")+
+      '</div><label class="checkbox-label" style="margin-top:20px"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
+      '<p class="hint">선택된 JAR 파일은 서버 루트 폴더에 업로드되어 있어야 합니다. 설정 변경은 서버가 중지된 상태에서만 가능합니다.</p></section>'+
+      '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>');
+}
+function renderLiveNetwork(){
+  return header("네트워크","패널이 등록한 Minecraft TCP 포트")+liveViewStatus()+
+  card("포트 할당",'<div class="info-list">'+state.network.map(p=>
+    '<div class="info-line"><div><strong>TCP '+h(p.port)+'</strong><p>'+h(p.description)+'</p></div>'+
+    '<span class="right">설정됨</span></div>').join("")+'</div>')+
+  '<p class="hint">호스트의 실제 방화벽·포트 점유 상태를 자동으로 확인하는 기능은 아직 없습니다.</p>';
+}
+function renderLiveSchedules(){
+  return header("예약 작업","한국 시간 기준 매일 또는 지정 요일에 백업·재시작")+liveViewStatus()+
+    '<div class="two-col" style="grid-template-columns:minmax(0,1.5fr) minmax(285px,1fr)">'+
+    card("예약 목록",'<div class="info-list">'+(state.schedules.map(item=>
+      '<div class="info-line"><div><strong>'+h(item.name)+'</strong><p>'+
+      h(item.cron)+' · '+h(item.type==="backup"?"백업":"재시작")+
+      '</p></div>'+button("삭제","schedule-delete","small",'data-id="'+h(item.id)+'"')+
+      '</div>').join("")||'<div class="empty-state">예약 작업이 없습니다.</div>')+'</div>')+
+    '<form class="card settings-card" id="schedule-form"><h2>새 예약 작업</h2><div class="stack">'+
+      inputRow("schedule-name","작업 이름","야간 백업")+
+      inputRow("schedule-cron","실행식 (예: 매일 오전 3시)","0 3 * * *")+
+      '<div class="form-group"><label>작업</label><select class="select" name="schedule-type" id="schedule-type">'+
+      '<option value="backup">백업</option><option value="restart">재시작</option></select></div>'+
+      '<button class="btn primary" type="submit">예약 추가</button></div></form></div>'+
+    '<p class="hint">지원 형식: 분 시 * * * 또는 분 시 * * 요일(0=일요일). 패널 프로세스가 실행 중이어야 예약이 실행됩니다.</p>';
+}
+function renderLiveHealth(){
+  const status=state.health;
+  return header("상태 확인","관리 프로세스에서 확인한 실제 Java 프로세스 상태",
+    button(icon("refresh","small")+" 새로고침","health-check"))+
+    liveViewStatus()+
+    (!status?'<div class="card empty-state">상태 정보를 확인할 수 없습니다.</div>':
+      card("실행 상태",'<div class="info-list">'+
+        '<div class="info-line"><strong>Java 프로세스</strong><span class="right">'+h(status.status||"unknown")+'</span></div>'+
+        '<div class="info-line"><strong>메모리 (RSS)</strong><span class="right">'+
+          (status.memoryGb==null?'측정 불가':h(status.memoryGb)+' GB')+'</span></div>'+
+        '<div class="info-line"><strong>실행 시간</strong><span class="right">'+h(status.uptime||"—")+'</span></div>'+
+      '</div>'))+
+    '<p class="hint">TPS, MSPT, 플레이어 수는 서버용 데이터 수집 플러그인 또는 별도 API가 연결되어야 실제 측정할 수 있습니다.</p>';
+}
+function renderLiveUsers(){
+  return header("사용자","현재 버전은 단일 관리자 로그인만 지원합니다")+
+  card("관리자",'<div class="info-list"><div class="info-line"><div><strong>관리자</strong>'+
+    '<p>세션 인증·CSRF 보호·로그인 시도 제한을 적용합니다.</p></div>'+
+    button("로그아웃","logout")+'</div></div>')+
+  '<p class="hint">다중 사용자 계정, 역할별 권한 제어는 아직 구현되지 않았습니다.</p>';
+}
+function renderLiveAudit(){
+  const entries=state.audit||[];
+  return header("감사 로그","실제 관리자 작업 기록")+liveViewStatus()+
+  card("최근 작업",'<div class="table-scroll"><table class="data-table"><thead><tr><th>시각</th><th>작업</th><th>대상</th></tr></thead><tbody>'+
+    (entries.map(x=>'<tr><td>'+h(new Date(x.time).toLocaleString("ko-KR"))+'</td><td>'+h(x.action)+'</td>'+
+      '<td>'+h(x.serverId||"패널")+'</td></tr>').join("")||
+      '<tr><td colspan="3" class="empty-state">아직 기록된 작업이 없습니다.</td></tr>')+
+    '</tbody></table></div>');
+}
+
 function renderBackups() {
-  if (state.mode === "live") return renderUnconnected("백업", "백업 조회·복원 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveBackups();
   const stats = [["복구 가능한 백업","8개","전체 백업 기록"],["전체 보관 크기","14.8 GB","백업 파일 합계"],["마지막 백업","3분 전","정상 완료"]];
   return `${header("백업","백업을 생성하고 원하는 시점으로 서버를 복구합니다",button(`${icon("plus","small")} 새 백업`,"backup-create","primary"))}
     <div class="grid-stats" style="grid-template-columns:repeat(3,minmax(0,1fr))">${stats.map(([label,value,desc]) =>
@@ -309,7 +420,7 @@ function inputRow(name,label,value,type="text") {
     <input class="field" id="${h(name)}" name="${h(name)}" type="${type}" value="${h(value)}" autocomplete="off"></div>`;
 }
 function renderStartup() {
-  if (state.mode === "live") return renderUnconnected("시작 설정", "서버별 실행 설정 조회 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveStartup();
   const st = state.startup;
   return `${header("시작 설정","실행 파일과 시작 옵션을 변경합니다")}
   <form id="startup-form" class="stack">
@@ -328,7 +439,7 @@ function renderStartup() {
   </form>${demoNote()}`;
 }
 function renderNetwork() {
-  if (state.mode === "live") return renderUnconnected("네트워크", "포트 할당과 충돌 검사 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveNetwork();
   const rows = [
     ["25565","TCP","마인크래프트 기본 접속 포트","사용 중"],
     ["8123","TCP","Dynmap 웹 접속 주소","사용 중"]
@@ -343,7 +454,7 @@ function renderNetwork() {
       ${button("다시 검사","health-check")}</div></div>`)}</div>${demoNote()}`;
 }
 function renderSchedules() {
-  if (state.mode === "live") return renderUnconnected("예약 작업", "예약 작업 조회 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveSchedules();
   return `${header("예약 작업","백업과 유지보수 작업을 예약해 자동 실행합니다")}
     <div class="two-col" style="grid-template-columns:minmax(0,1.5fr) minmax(285px,1fr)">
       ${card("예약된 작업",`<div class="info-list">
@@ -360,7 +471,7 @@ function renderSchedules() {
         </div></form></div>${demoNote()}`;
 }
 function renderHealth() {
-  if (state.mode === "live") return renderUnconnected("상태 확인", "상태 감시 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveHealth();
   return `${header("상태 확인","프로세스와 자동 복구 정책을 확인합니다",button(`${icon("refresh","small")} 다시 검사`,"health-check"))}
     <section class="card overview-head"><span class="server-glyph" style="background:var(--success-soft);color:var(--success)">${icon("check","large")}</span>
       <div class="overview-title"><h2>모든 검사 정상</h2><p>마지막 검사 11초 전 · 상태 감시 사용 중 (예시)</p></div><span class="status running">정상</span></section>
@@ -373,7 +484,7 @@ function renderHealth() {
       </div>`)}${demoNote()}`;
 }
 function renderUsers() {
-  if (state.mode === "live") return renderUnconnected("사용자", "사용자 권한 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveUsers();
   return `${header("사용자","사용자와 서버별 권한을 확인합니다",button(`${icon("plus","small")} 사용자 초대`,"user-invite","primary"))}
     ${card("워크스페이스 사용자",`<div class="table-scroll"><table class="data-table"><thead><tr>
       <th>사용자</th><th>권한</th><th>접근 범위</th></tr></thead><tbody>
@@ -381,7 +492,7 @@ function renderUsers() {
       </tbody></table></div>`)}${demoNote()}`;
 }
 function renderAudit() {
-  if (state.mode === "live") return renderUnconnected("감사 로그", "감사 기록 API 연결이 필요합니다");
+  if (state.mode === "live") return renderLiveAudit();
   return `${header("감사 로그","서버와 패널의 주요 작업 기록을 확인합니다",button(`${icon("download","small")} 내보내기`,"audit-export"))}
     ${card("최근 감사 기록",`<div class="table-scroll"><table class="data-table"><thead><tr>
       <th>시각</th><th>작업</th><th>사용자</th><th>대상</th></tr></thead><tbody>
