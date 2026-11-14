@@ -12,7 +12,6 @@ import (
  "os"
  "os/exec"
  "path/filepath"
- "runtime"
  "strings"
  "sync"
  "time"
@@ -303,5 +302,5 @@ func (m *manager) shutdown(ctx context.Context)error{
 }
 func (m *manager) scheduleLoop(){
  ticker:=time.NewTicker(30*time.Second);defer ticker.Stop()
- for{select{case <-m.stopScheduler:return;case <-ticker.C: /* Scheduler operations are added below. */}}
+ for{select{case <-m.stopScheduler:return;case moment:=<-ticker.C:m.scheduleTick(moment)}}
 }
