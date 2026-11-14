@@ -12,6 +12,8 @@ import (
  "os"
  "path/filepath"
  "regexp"
+ "sort"
+ "strconv"
  "strings"
  "time"
 )
@@ -54,6 +56,17 @@ func templateVersions(ctx context.Context,project string)([]string,error){
    if !seen[v]&&versionPattern.MatchString(v){seen[v]=true;versions=append(versions,v)}
   }
  }
+ sort.Slice(versions,func(i,j int)bool{
+  left,right:=strings.Split(versions[i],"-")[0],strings.Split(versions[j],"-")[0]
+  a,b:=strings.Split(left,"."),strings.Split(right,".")
+  for k:=0;k<len(a)||k<len(b);k++{
+   var x,y int
+   if k<len(a){x,_=strconv.Atoi(a[k])}
+   if k<len(b){y,_=strconv.Atoi(b[k])}
+   if x!=y{return x>y}
+  }
+  return versions[i]>versions[j]
+ })
  return versions,nil
 }
 type officialBuild struct{
