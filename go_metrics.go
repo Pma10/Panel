@@ -2,6 +2,7 @@ package main
 
 import (
  "bufio"
+ "bytes"
  "context"
  "encoding/binary"
  "encoding/json"
@@ -62,10 +63,10 @@ func pingMinecraft(ctx context.Context,port int)(*minecraftStatus,error){
  if _,err=socket.Write(frame);err!=nil{return nil,err}
  reader:=bufio.NewReader(socket)
  packetSize,err:=readVarint(reader)
- if err!=nil||packetSize<2||packetSize>1<<20{return nil,errors.New("invalid status packet")}
+ if err!=nil||packetSize<2||packetSize>128<<10{return nil,errors.New("invalid status packet")}
  data:=make([]byte,packetSize)
  if _,err:=io.ReadFull(reader,data);err!=nil{return nil,err}
- payload:=bufio.NewReader(strings.NewReader(string(data)))
+ payload:=bufio.NewReader(bytes.NewReader(data))
  packetID,err:=readVarint(payload)
  if err!=nil||packetID!=0{return nil,errors.New("invalid status response")}
  length,err:=readVarint(payload)
