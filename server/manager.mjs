@@ -206,10 +206,24 @@ export class MinecraftManager {
     });
     return this.start(id);
   }
+  async waitForStop(id,timeoutMs=39000){
+    const started=Date.now();
+    while(this.active.has(id)){
+      if(Date.now()-started>timeoutMs)throw new HttpError(504,"Java 프로세스 종료 시간 초과");
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+  }
   async close() {
     this.stopped=true;
     if(this.scheduleTimer)clearInterval(this.scheduleTimer);
-    await Promise.all([...this.active.keys()].map(async id=>{try{await this.stop(id);}catch{}}));
+    const ids=[...this.active.keys()];
+    await Promise.all(ids.map(async id=>{
+      try{await this.stop(id);await this.waitForStop(id);}
+      catch(error){
+        const item=this.active.get(id);
+        if(item?.proc){item.proc.kill("SIGKILL");await this.waitForStop(id,3000).catch(()=>{});}
+      }
+    }));
   }
   async files(id,sub=""){
     const base=this.dir(id),path=await confinedPath(base,sub);
@@ -305,6 +319,7 @@ export class MinecraftManager {
   }
   async backup(id) {
     const cfg=this.get(id),folder=this.dir(id);
+    assert(!this.active.has(id),409,"월드 일관성을 위해 서버를 중지한 뒤 백업하세요.");
     assert(!this.busy.has(id),409,"다른 백업/복원 작업이 진행 중입니다.");
     this.busy.add(id);
     const bid=makeId(),backupDir=join(this.backupsDir,id,bid);
@@ -320,6 +335,17 @@ export class MinecraftManager {
       return meta;
     }catch(e){await rm(backupDir,{recursive:true,force:true});throw e;}
     finally{this.busy.delete(id);}
+  }
+  async scheduledBackup(id){
+    const wasRunning=this.active.has(id);
+    if(wasRunning){await this.stop(id);await this.waitForStop(id);}
+    try{return await this.backup(id);}
+    finally{
+      if(wasRunning){
+        try{await this.start(id);}
+        catch(error){this.pushLog(id,"WARN","백업 후 서버 재시작 실패: "+error.message);}
+      }
+    }
   }
   async backups(id){
     this.get(id);
@@ -395,7 +421,7 @@ export class MinecraftManager {
         const [minute,hour,,,day]=item.cron.split(" ");
         if(Number(minute)!==Number(obj.minute)||Number(hour)!==Number(obj.hour)||(day!=="*"&&Number(day)!==weekdays[obj.weekday]))continue;
         item.lastRun=stamp;await this.persist();
-        try{if(item.type==="backup")await this.backup(cfg.id);else await this.restart(cfg.id);}
+        try{if(item.type==="backup")await this.scheduledBackup(cfg.id);else await this.restart(cfg.id);}
         catch(e){this.pushLog(cfg.id,"WARN","예약 작업 실패: "+e.message);}
       }
     };
