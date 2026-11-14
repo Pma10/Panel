@@ -122,8 +122,8 @@ function renderDashboard() {
       <div class="summary-primary"><strong><i class="indicator" style="color:var(--success)"></i>${sum.running}대 서버가 실행 중</strong>
         <small>전체 ${sum.total}대 중 중지 ${sum.total-sum.running}대 · 서버 상태 확인</small>
         <span class="fine-print">최근 확인 · ${state.mode === "demo" ? "예시 데이터" : "연결된 API"}</span></div>
-      <div class="summary-secondary"><span>현재 접속 인원</span><strong>${sum.players}명</strong></div>
-      <div class="summary-secondary"><span>전체 메모리 사용량</span><strong>${sum.memoryGb.toFixed(1)} GB</strong></div>
+      <div class="summary-secondary"><span>현재 접속 인원</span><strong>${state.mode==="live" && !state.servers.some(x=>x.players!=null)?"측정 중":sum.players+"명"}</strong></div>
+      <div class="summary-secondary"><span>전체 메모리 사용량</span><strong>${state.mode==="live" && !state.servers.some(x=>x.memoryGb!=null)?"측정 불가":sum.memoryGb.toFixed(1)+" GB"}</strong></div>
     </section>
     <div class="dashboard-layout">
       ${card("내 서버",`<div class="table-scroll"><table class="data-table">
@@ -259,6 +259,8 @@ function renderLiveFiles(){
     button("이름 변경","file-rename","",nameAttr+(running?' disabled':''))+
     button("삭제","file-delete","danger",nameAttr+(running?' disabled':''))+
     '</div>':'<p class="hint">항목을 선택하면 파일 작업이 표시됩니다.</p>';
+  if(!server())return header("파일","실제 서버 파일 시스템")+
+    '<div class="card empty-state"><strong>먼저 서버를 생성하세요.</strong><p>서버 생성 후 JAR 파일을 업로드할 수 있습니다.</p><a class="btn" href="#/servers">서버 목록</a></div>';
   return header("파일","실제 서버 파일 시스템 · 서버 폴더 내부만 접근할 수 있습니다")+
     bar+
     (running?'<div class="notice">파일 수정 및 업로드는 서버를 중지한 상태에서만 가능합니다.</div>':'')+
@@ -323,7 +325,7 @@ function renderLiveBackups(){
   const stopped=server()?.status==="stopped";
   const total=list.reduce((sum,x)=>sum+(Number(x.size)||0),0);
   return header("백업","서버 월드와 파일을 실제 폴더 스냅샷으로 보관합니다",
-    button(icon("plus","small")+" 새 백업","backup-create","primary"))+
+    button(icon("plus","small")+" 새 백업","backup-create","primary",stopped?"":"disabled"))+
     liveViewStatus()+
     '<div class="grid-stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+
       '<div class="card stat-card"><span>백업 개수</span><strong>'+list.length+'</strong></div>'+
@@ -333,7 +335,7 @@ function renderLiveBackups(){
       ' · '+h(b.files)+'개 파일</p></div><span class="right">'+fileSize(b.size)+'</span>'+
       button("복원","backup-restore","small",'data-id="'+h(b.id)+'" '+(stopped?'':'disabled'))+'</div>').join("")||
       '<div class="empty-state"><strong>백업이 없습니다.</strong><p>새 백업을 생성해 보세요.</p></div>')+'</div>')+
-    '<div class="notice">복원은 서버를 중지한 후 가능합니다. 복원할 때 현재 파일이 변경되므로 중요한 데이터는 별도 보관하세요.</div>';
+    '<div class="notice">백업 생성과 복원은 서버가 중지된 상태에서만 가능합니다. 예약 백업은 자동으로 서버를 중지·재시작하므로 접속 중단이 발생할 수 있습니다.</div>';
 }
 function renderLiveStartup(){
   const st=state.startupLive;
@@ -344,7 +346,7 @@ function renderLiveStartup(){
       inputRow("live-name","서버 이름",st.name)+
       inputRow("live-memory","최대 메모리 (MiB)",st.memoryMb,"number")+
       inputRow("live-jar","실행 JAR 이름",st.jar)+
-      inputRow("live-port","접속 포트 (읽기 전용)",st.port,"number")+
+      '<div class="form-group"><label for="live-port">접속 포트</label><input id="live-port" class="field" type="number" value="'+h(st.port)+'" readonly></div>'+
       '</div><label class="checkbox-label" style="margin-top:20px"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
       '<p class="hint">선택된 JAR 파일은 서버 루트 폴더에 업로드되어 있어야 합니다. 설정 변경은 서버가 중지된 상태에서만 가능합니다.</p></section>'+
       '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>');
