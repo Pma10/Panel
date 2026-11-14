@@ -141,9 +141,9 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
  // This mutation happens only after the complete JAR is hash-verified.
  // Keep one previous JAR on disk so an operator can roll back safely.
  previous:=filepath.Join(m.dir(id),".panel-previous.jar")
+ oldBackup:=previous+".older-"+makeID()
+ movedOld:=false
  if updating{
-  oldBackup:=previous+".older-"+makeID()
-  movedOld:=false
   if _,statErr:=os.Lstat(previous);statErr==nil{
    if err:=os.Rename(previous,oldBackup);err!=nil{return nil,err}
    movedOld=true
@@ -157,7 +157,8 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
    if movedOld{_ = os.Rename(oldBackup,previous)}
    return nil,err
   }
-  if movedOld{_ = os.Remove(oldBackup)}
+  // Keep the former rollback slot until the version metadata is durably
+  // persisted. Removing it here would lose rollback history on disk errors.
  }else{
   if _,err:=os.Lstat(dest);err==nil{return nil,apiError{409,"설치 중 JAR이 생성되었습니다."}}
   if err:=os.Rename(tmp,dest);err!=nil{return nil,err}
@@ -174,13 +175,20 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
   if updating{
    failed:=dest+".failed-"+makeID()
    if os.Rename(dest,failed)==nil{
-    _ = os.Rename(previous,dest)
-    _ = os.Remove(failed)
+    if restoreErr:=os.Rename(previous,dest);restoreErr==nil{
+     _ = os.Remove(failed)
+     // Restore the previous rollback slot as well.
+     if movedOld{_ = os.Rename(oldBackup,previous)}
+    }else{
+     // Keep the newly installed JAR rather than deleting both copies.
+     _ = os.Rename(failed,dest)
+    }
    }
   }else{_ = os.Remove(dest)}
  }
  m.mu.Unlock()
  if err!=nil{return nil,err}
+ if movedOld{_ = os.Remove(oldBackup)}
  verb:="설치";if updating{verb="업데이트"}
  m.log(id,"INFO","공식 "+project+" "+version+" "+verb+" 완료")
  return map[string]any{"project":project,"version":version,"size":size,"sha256":hex.EncodeToString(hash.Sum(nil)),"buildId":selected.ID,"updated":updating},nil
