@@ -159,8 +159,8 @@ function renderOverview() {
     ["가동 시간",s.uptime,"마지막 시작 이후"]
   ].map(([title,value,note]) => `<div class="card stat-card"><span>${h(title)}</span><strong>${h(value)}</strong><small>${h(note)}</small></div>`).join("");
   const resources = [
-    ["CPU 사용량",s.cpu.toFixed(1)+"%","호스트 프로세서",s.cpu/100],
-    ["메모리 사용량",formatMemory(s.memoryGb)+" / "+s.memoryLimitGb+" GB","할당 메모리 대비 사용량",s.memoryGb/s.memoryLimitGb]
+    ["CPU 사용량",s.cpu==null?"측정 불가":Number(s.cpu).toFixed(1)+"%","호스트 프로세서",s.cpu==null?0:s.cpu/100],
+    ["메모리 사용량",formatMemory(s.memoryGb)+" / "+s.memoryLimitGb+" GB","할당 메모리 대비 사용량",s.memoryGb==null?0:s.memoryGb/s.memoryLimitGb]
   ].map(([title,value,note,percent],index) => `<div class="card resource-card"><h2>${h(title)}</h2>
     <strong>${h(value)}</strong><p>${h(note)}</p><div class="progress-track"><div class="progress-fill ${index ? "green" : ""}" style="width:${Math.min(100,Math.max(0,percent*100))}%"></div></div></div>`).join("");
   return `${header("서버 개요","서버 상태와 자원 사용량을 확인합니다")}
