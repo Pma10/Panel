@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node scripts/serve.mjs",
     "start": "node scripts/serve.mjs",
-    "check": "node --check src/app.js && node --check src/api.js && node --check src/data.js && node --check src/utils.mjs && node --check scripts/serve.mjs && node --check server/security.mjs && node --check server/manager.mjs && node --check server/http.mjs && node --check server/main.mjs",
+    "check": "node --check src/app.js && node --check src/api.js && node --check src/data.js && node --check src/utils.mjs && node --check scripts/serve.mjs && node --check server/security.mjs && node --check server/manager.mjs && node --check server/http.mjs && node --check server/main.mjs && node --check server/audit.mjs && node --check server/ping.mjs",
     "test": "node --test",
     "panel": "node server/main.mjs"
   },
