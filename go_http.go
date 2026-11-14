@@ -1,7 +1,6 @@
 package main
 
 import (
- "bytes"
  "encoding/json"
  "errors"
  "fmt"
@@ -73,11 +72,21 @@ func (a *panelAPI)ServeHTTP(w http.ResponseWriter,r *http.Request){
  if strings.Contains(file,"..") || strings.Contains(file,"\\") {http.NotFound(w,r);return}
  relative:=strings.TrimPrefix(file,"/")
  if path.Clean(relative)!=relative{http.NotFound(w,r);return}
- data,err:=frontend.ReadFile(relative)
+ asset,err:=frontend.Open(relative)
  if err!=nil{http.NotFound(w,r);return}
+ defer asset.Close()
+ info,err:=asset.Stat()
+ if err!=nil||!info.Mode().IsRegular(){http.NotFound(w,r);return}
  if file=="/index.html"{h.Set("Cache-Control","no-cache")}else{h.Set("Cache-Control","public, max-age=3600")}
- h.Set("Content-Type",mime.TypeByExtension(filepath.Ext(relative)))
- http.ServeContent(w,r,relative,time.Time{},bytes.NewReader(data))
+ contentType:=mime.TypeByExtension(filepath.Ext(relative))
+ if contentType==""{contentType="application/octet-stream"}
+ h.Set("Content-Type",contentType)
+ if seeker,ok:=asset.(io.ReadSeeker);ok{
+  http.ServeContent(w,r,relative,time.Time{},seeker)
+ }else{
+  h.Set("Content-Length",fmt.Sprint(info.Size()))
+  if r.Method=="GET"{_,_=io.Copy(w,asset)}
+ }
 }
 func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
  url:=strings.TrimPrefix(r.URL.Path,"/api/v1/")
