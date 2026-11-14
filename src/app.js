@@ -47,7 +47,7 @@ const state = {
   route: routeFromHash(location.hash), selectedId: "pvpconnect",
   servers: structuredClone(DEMO_SERVERS), logs: replaceLogHistory(DEMO_LOGS), activity: [...DEMO_ACTIVITY],
   schedules: [...DEMO_SCHEDULES], mode: apiEnabled ? "live" : "demo",
-  loading: apiEnabled, apiError: "",
+  loading: apiEnabled, apiError: "", logError: "", logLoading: false,
   query: "", serverQuery: "", serverStatus: "all", fileQuery: "", filePath: "/home/minecraft/server", selectedFile: "",
   level: "all", autoScroll: true, command: "", theme: getStore("pconn-theme", "light"),
   modal: null, paletteQuery: "", mobileMenu: false,
@@ -189,7 +189,7 @@ function renderConsole() {
     </div>
     <section class="console-panel" aria-label="실시간 서버 로그">
       <header class="console-statusbar">
-        <span class="console-status ${!s || s.status !== "running" ? "offline" : ""}"><i class="indicator"></i>${state.mode==="demo" ? "예시 로그" : state.apiError ? "연결 오류" : "연결됨"}</span>
+        <span class="console-status ${!s || s.status !== "running" ? "offline" : ""}"><i class="indicator"></i>${state.mode==="demo" ? "예시 로그" : state.logError ? "연결 오류" : "연결됨"}</span>
         <span class="console-separator console-desktop"></span><span class="console-muted console-desktop">${h(s?.name || "선택된 서버 없음")}</span>
         <span class="console-grow"></span><span class="console-muted console-desktop">실시간 출력</span>
         <span class="console-separator console-desktop"></span><span class="console-muted mono">UTF-8</span>
@@ -513,11 +513,20 @@ async function sendCommand() {
     input?.focus();
     return;
   }
+  if (commandPending) return;
+  commandPending = true;
+  const submit = $(".command-send");
+  if (submit) submit.disabled = true;
   try {
     await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/commands",{method:"POST",body:{command:command.value}});
     state.command = ""; if ($("#console-command")) $("#console-command").value = "";
     toast("명령어 전송 요청이 접수되었습니다.");
   } catch (error) { toast(error.message); }
+  finally {
+    commandPending = false;
+    const button = $(".command-send");
+    if (button) button.disabled = false;
+  }
 }
 async function performPowerAction() {
   const action = state.modal?.power;
@@ -550,38 +559,107 @@ async function restoreBackup() {
   try { await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups/"+encodeURIComponent(id)+"/restore",{method:"POST"});toast("복원 작업이 접수되었습니다.");}
   catch(e) { toast(e.message); }
 }
+async function loadSelectedLogs() {
+  const version = ++logFetchVersion;
+  const selected = state.selectedId;
+  state.logs = [];
+  cancelLogUpdate();
+  if (!selected) return;
+  try {
+    const response = await apiRequest("/servers/" + encodeURIComponent(selected) + "/logs");
+    if (version !== logFetchVersion || selected !== state.selectedId) return;
+    const entries = Array.isArray(response) ? response : response?.entries;
+    state.logs = replaceLogHistory(entries);
+  } catch (error) {
+    if (version === logFetchVersion && selected === state.selectedId) {
+      // Logs may fail independently; do not hide the working server list.
+      state.logError = error?.message || "로그를 불러올 수 없습니다.";
+    }
+  }
+}
+async function switchSelectedServer(id,destination="overview") {
+  if (!state.servers.some((s) => s.id === id)) return toast("해당 서버를 찾을 수 없습니다.");
+  const changed = id !== state.selectedId;
+  setModal(null);
+  if (changed) {
+    ++logFetchVersion;
+    if (logClose) { logClose(); logClose = null; }
+    state.selectedId = id;
+    state.logs = state.mode === "demo" ? replaceLogHistory(DEMO_LOGS) : [];
+    state.logError = "";
+    state.logLoading = state.mode === "live";
+    cancelLogUpdate();
+  }
+  navigate(destination);
+  if (changed && state.mode === "live") {
+    await loadSelectedLogs();
+    if (id !== state.selectedId) return;
+    state.logLoading = false;
+    render();
+    connectLogStream();
+  }
+}
 async function loadFromApi() {
   if (!apiEnabled) return;
-  if (logClose) { logClose(); logClose=null; }
-  state.loading = true; state.apiError = ""; state.servers=[];state.logs=[];render();
+  const version = ++loadVersion;
+  ++logFetchVersion;
+  if (logClose) { logClose(); logClose = null; }
+  cancelLogUpdate();
+  state.loading = true;
+  state.apiError = "";
+  state.logError = "";
+  state.logLoading = true;
+  state.servers = [];
+  state.logs = [];
+  render();
   try {
     const value = await apiRequest("/servers");
+    if (version !== loadVersion) return;
     const items = Array.isArray(value) ? value : value?.servers;
     if (!Array.isArray(items)) throw new Error("서버 응답 형식이 올바르지 않습니다.");
-    state.servers = items.filter((it) => it && typeof it.id==="string" && typeof it.name==="string")
+    state.servers = items.filter((it) => it && typeof it.id === "string" && typeof it.name === "string")
       .map((it) => ({...it,status:it.status||"unknown",players:Number(it.players)||0,maxPlayers:Number(it.maxPlayers)||0,
         memoryGb:Number(it.memoryGb)||0,memoryLimitGb:Number(it.memoryLimitGb)||1,cpu:Number(it.cpu)||0,
         directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—"}));
-    if (!state.servers.some((s) => s.id===state.selectedId)) state.selectedId=state.servers[0]?.id||"";
-    if (state.selectedId) {
-      const logs = await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/logs");
-      const list = Array.isArray(logs) ? logs : logs?.entries;
-      state.logs = Array.isArray(list) ? list.filter((entry) => entry && typeof entry.time==="string" && typeof entry.level==="string" && typeof entry.message==="string").slice(-2000) : [];
+    if (!state.servers.some((s) => s.id === state.selectedId)) state.selectedId = state.servers[0]?.id || "";
+    if (state.selectedId) await loadSelectedLogs();
+  } catch (error) {
+    if (version !== loadVersion) return;
+    state.apiError = error?.message || "연결할 수 없습니다.";
+    state.servers = [];
+    state.logs = [];
+  } finally {
+    if (version === loadVersion) {
+      state.loading = false;
+      state.logLoading = false;
+      render();
+      connectLogStream();
     }
-  } catch (error) { state.apiError=error.message || "연결할 수 없습니다.";state.servers=[];state.logs=[]; }
-  finally { state.loading=false;render(); connectLogStream(); }
+  }
 }
 function connectLogStream() {
-  if (logClose) { logClose(); logClose=null; }
-  if (!apiEnabled || !state.selectedId || state.route!=="console" || state.apiError) return;
-  logClose = streamLogs(state.selectedId,(entry) => {
-    state.logs = [...state.logs,entry].slice(-2000);
-    updateLogRows();
-  },() => { state.apiError="실시간 로그 연결이 불안정합니다."; });
+  if (logClose) { logClose(); logClose = null; }
+  if (!apiEnabled || !state.selectedId || state.route !== "console" ||
+      state.apiError || state.loading || state.logLoading) return;
+  const serverId = state.selectedId;
+  logClose = streamLogs(serverId,(entry) => {
+    if (state.selectedId !== serverId) return;
+    if (appendBoundedLog(state.logs,entry)) scheduleLogUpdate();
+  },() => {
+    if (state.selectedId !== serverId) return;
+    state.logError = "실시간 로그 연결이 불안정합니다.";
+    const label = $(".console-status");
+    if (label?.lastChild?.nodeType === 3) label.lastChild.textContent = "연결 오류";
+  },() => {
+    if (state.selectedId !== serverId) return;
+    state.logError = "";
+    const label = $(".console-status");
+    if (label?.lastChild?.nodeType === 3) label.lastChild.textContent = "연결됨";
+  });
 }
 window.addEventListener("hashchange", () => {
   state.route=routeFromHash(location.hash);state.mobileMenu=false;state.modal=null;
-  render();connectLogStream(); window.scrollTo({top:0,behavior:"auto"});
+  cancelLogUpdate();render();connectLogStream(); window.scrollTo({top:0,behavior:"auto"});
 });
 document.addEventListener("keydown",(event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==="k") {
@@ -620,11 +698,13 @@ document.addEventListener("click",async(event) => {
   if (action==="palette-navigate"){navigate(target.dataset.route);return;}
   if (action==="server-switcher"){setModal({kind:"switcher"});return;}
   if (action==="choose-server"){
-    state.selectedId=target.dataset.id;setModal(null);state.logs=apiEnabled?[]:[...DEMO_LOGS];
-    if(apiEnabled){await loadFromApi();}
-    navigate(state.route==="dashboard"?"dashboard":"overview");return;
+    await switchSelectedServer(target.dataset.id,state.route==="dashboard"?"dashboard":"overview");
+    return;
   }
-  if (action==="select-server"){state.selectedId=target.dataset.id;navigate("overview");return;}
+  if (action==="select-server"){
+    await switchSelectedServer(target.dataset.id,"overview");
+    return;
+  }
   if (action==="server-create"){setModal({kind:"create"});return;}
   if (action==="power-confirm"){
     const power=target.dataset.power || "restart";
@@ -658,7 +738,14 @@ document.addEventListener("click",async(event) => {
   if (action==="api-retry"){await loadFromApi();return;}
   if (["file-upload","file-new-folder","network-add","user-invite","health-check"].includes(action)){mockActionMessage(action);return;}
   if (action==="log-level"){
-    state.level=target.dataset.level;render();$("#log-search")?.focus();return;
+    state.level=target.dataset.level;
+    document.querySelectorAll('[data-action="log-level"]').forEach((btn) => {
+      const active = btn.dataset.level === state.level;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-pressed", String(active));
+    });
+    updateLogRows();
+    return;
   }
 });
 document.addEventListener("submit",async(event) => {
@@ -684,7 +771,7 @@ document.addEventListener("submit",async(event) => {
   if(form.id==="schedule-form"){
     const d=new FormData(form);const name=String(d.get("schedule-name")||"").trim();
     if(!name)return toast("작업 이름을 입력해 주세요.");
-    if(state.mode==="demo"){state.schedules.push({id:"demo-"+Date.now(),name,when:String(d.get("schedule-cron")||""),type:String(d.get("schedule-type")||"백업"),active:false});render();toast("예시 작업에만 추가되었습니다. 실제 실행은 예약되지 않았습니다.");}
+    if(state.mode==="demo"){if(state.schedules.length>=50)return toast("예시 작업은 최대 50개까지 등록할 수 있습니다.");state.schedules.push({id:"demo-"+Date.now(),name,when:String(d.get("schedule-cron")||""),type:String(d.get("schedule-type")||"백업"),active:false});render();toast("예시 작업에만 추가되었습니다. 실제 실행은 예약되지 않았습니다.");}
     else{try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/schedules",{method:"POST",body:{name,cron:String(d.get("schedule-cron")),type:String(d.get("schedule-type"))}});toast("예약 작업 생성 요청이 접수되었습니다.");}catch(e){toast(e.message);}}
     return;
   }
@@ -692,6 +779,7 @@ document.addEventListener("submit",async(event) => {
     const d=new FormData(form);const name=String(d.get("server-name")||"").trim();
     if(!name)return toast("서버 이름을 입력해 주세요.");
     if(state.mode==="demo"){
+      if(state.servers.length>=50)return toast("예시 서버는 최대 50대까지 등록할 수 있습니다.");
       const id="demo-"+Date.now();
       state.servers.push({id,name,kind:String(d.get("server-kind")||"마인크래프트"),status:"stopped",players:0,maxPlayers:20,memoryGb:0,memoryLimitGb:4,cpu:0,tps:null,mspt:null,port:25569,uptime:"—",version:"예시 서버",directory:"—"});
       state.selectedId=id;setModal(null);navigate("servers");toast("예시 서버를 목록에 추가했습니다. 실제 서버는 생성되지 않았습니다.");
