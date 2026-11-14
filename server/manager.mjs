@@ -101,9 +101,9 @@ export class MinecraftManager {
     assert(!this.creating,409,"서버 생성 작업이 이미 진행 중입니다.");
     this.creating=true;
     const id=makeId(),dir=join(this.serversDir,id);
-    await mkdir(dir,{mode:0o700});
     const cfg={id,name,memoryMb,port,jar:"server.jar",eulaAccepted,createdAt:now(),schedules:[]};
     try {
+      await mkdir(dir,{mode:0o700});
       await writeFile(join(dir,"eula.txt"),"eula="+eulaAccepted+"\n");
       await writeFile(join(dir,"server.properties"),"server-port="+port+"\nonline-mode=true\nenable-rcon=false\n");
       this.servers.set(id,cfg);this.logs.set(id,[]);
