@@ -1,7 +1,7 @@
 
 import { DEMO_SERVERS, DEMO_LOGS, DEMO_ACTIVITY, DEMO_FILES, DEMO_BACKUPS, DEMO_SCHEDULES, DEMO_USERS, DEMO_AUDIT, ROUTE_INFO } from "./data.js";
 import { escapeHtml as h, filterLogs, serverSummary, formatMemory, validateCommand, routeFromHash, appendBoundedLog, replaceLogHistory, recentLogs } from "./utils.mjs";
-import { apiEnabled, apiRequest, streamLogs, getSession, signIn, signOut, uploadFile, downloadFile } from "./api.js";
+import { apiEnabled, apiRequest, streamLogs, getSession, signIn, signOut, uploadFile, fileDownloadUrl } from "./api.js";
 
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => h(value);
@@ -572,6 +572,17 @@ function modalBody() {
       <div class="modal-actions" style="margin-top:25px"><button class="btn" type="button" data-action="modal-close">취소</button>
         <button class="btn primary" type="submit">서버 추가</button></div>
     </form></div>`;
+  if (m.kind==="file-editor") return '<div class="modal-scrim" data-action="modal-background"><form class="modal file-edit-dialog" id="file-editor-form" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
+    '<h2 id="modal-title">파일 편집 · '+h(m.path)+'</h2><p>UTF-8 텍스트 파일 (최대 1MiB) · 서버 중지 시에만 저장</p>'+
+    '<textarea class="file-editor" name="content" spellcheck="false" '+(server()?.status!=="stopped"?'readonly':'')+'>'+h(m.content)+'</textarea>'+
+    '<div class="modal-actions" style="margin-top:17px"><button type="button" class="btn" data-action="modal-close">닫기</button>'+
+    '<button class="btn primary" type="submit" '+(server()?.status!=="stopped"?'disabled':'')+'>저장</button></div></form></div>';
+  if (m.kind==="file-mkdir" || m.kind==="file-rename") return '<div class="modal-scrim" data-action="modal-background">'+
+    '<form class="modal" id="'+(m.kind==="file-mkdir"?'folder-create-form':'file-rename-form')+'" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
+    '<h2 id="modal-title">'+(m.kind==="file-mkdir"?'새 폴더':'이름 변경')+'</h2><p>현재 서버 폴더 안에서만 생성 및 변경할 수 있습니다.</p>'+
+    '<div class="form-group"><label for="file-new-name">이름</label><input id="file-new-name" name="name" class="field" maxlength="100" required value="'+h(m.name||"")+'"></div>'+
+    '<div class="modal-actions" style="margin-top:22px"><button type="button" class="btn" data-action="modal-close">취소</button>'+
+    '<button type="submit" class="btn primary">확인</button></div></form></div>';
   return `<div class="modal-scrim" data-action="modal-background"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <h2 id="modal-title">${h(m.title || "확인")}</h2><p>${h(m.description || "")}</p>
     ${state.mode==="demo" ? `<div class="demo-block" style="margin-bottom:20px">예시 모드입니다. 실제 서버나 파일은 변경되지 않습니다.</div>` : ""}
@@ -783,6 +794,14 @@ async function performPowerAction() {
     toast("서버 작업 요청이 접수되었습니다."); await loadFromApi();
   } catch (error) { toast(error.message); }
 }
+async function openTextFile(name){
+  if(state.mode!=="live")return;
+  try {
+    const path=relativeFile(name);
+    const result=await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files/content?path="+encodeURIComponent(path));
+    setModal({kind:"file-editor",path,content:result.text});
+  } catch(e){toast(e.message);}
+}
 async function createBackup() {
   if (state.mode === "demo") { setModal(null); return toast("예시 모드: 실제 백업을 생성하지 않았습니다."); }
   try { await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/backups",{method:"POST"});toast("백업 작업이 접수되었습니다."); }
@@ -924,9 +943,14 @@ document.addEventListener("input",(event) => {
     state.paletteQuery=event.target.value;const root=$("#palette-results");if(root)root.innerHTML=paletteItems();
   }
 });
-document.addEventListener("change",(event) => {
+document.addEventListener("change",async(event) => {
   if (event.target.id==="log-autoscroll") {state.autoScroll=event.target.checked;scrollLogs();}
   if (event.target.id==="server-status"){state.serverStatus=event.target.value;state.serverPage=0;filterServerRows();}
+  if (event.target.id==="file-upload-input" && state.mode==="live"){
+    const file=event.target.files?.[0];if(!file)return;
+    try{await uploadFile(state.selectedId,relativeFile(file.name),file);toast("파일 업로드 완료: "+file.name);await loadFiles();}
+    catch(e){toast(e.message);}finally{event.target.value="";}
+  }
 });
 document.addEventListener("click",async(event) => {
   const target = event.target.closest("[data-action]");if (!target) return;
@@ -963,11 +987,43 @@ document.addEventListener("click",async(event) => {
   if (action==="power-run"){await performPowerAction();return;}
   if (action==="download-logs"){exportLogs();return;}
   if (action==="file-select"){state.selectedFile=target.dataset.name;render();return;}
-  if (action==="file-root"){state.filePath="/home/minecraft/server";state.selectedFile="";render();return;}
+  if (action==="file-root"){
+    state.filePath=state.mode==="live"?"":"/home/minecraft/server";state.selectedFile="";
+    if(state.mode==="live")await loadFiles();else render();return;
+  }
+  if (action==="file-upload"){
+    if(state.mode==="live")$("#file-upload-input")?.click();else mockActionMessage(action);return;
+  }
+  if (action==="file-new-folder"){
+    if(state.mode==="live")setModal({kind:"file-mkdir"});else mockActionMessage(action);return;
+  }
   if (action==="file-open"){
-    const value=DEMO_FILES.find((x)=>x.name===target.dataset.name);
-    if(value?.type==="folder"){state.filePath="/home/minecraft/server/"+value.name;state.selectedFile="";render();}
-    else mockActionMessage("파일 미리보기");return;
+    const value=(state.mode==="live"?state.fileEntries:DEMO_FILES).find(x=>x.name===target.dataset.name);
+    if(value?.type==="folder"){
+      state.filePath=state.mode==="live"?relativeFile(value.name):"/home/minecraft/server/"+value.name;
+      state.selectedFile="";if(state.mode==="live")await loadFiles();else render();
+    } else if(state.mode==="live")await openTextFile(target.dataset.name);
+    else mockActionMessage("파일 미리보기");
+    return;
+  }
+  if (action==="file-preview"){await openTextFile(target.dataset.name);return;}
+  if (action==="file-download" && state.mode==="live"){
+    const a=document.createElement("a");
+    a.href=fileDownloadUrl(state.selectedId,relativeFile(target.dataset.name));
+    a.download=target.dataset.name;document.body.appendChild(a);a.click();a.remove();return;
+  }
+  if (action==="file-rename"){setModal({kind:"file-rename",name:target.dataset.name});return;}
+  if (action==="file-delete"){
+    setModal({kind:"confirm",title:"파일을 삭제할까요?",
+      description:"'"+target.dataset.name+"' 항목을 삭제합니다. 폴더는 비어 있어야 삭제할 수 있습니다.",
+      path:relativeFile(target.dataset.name),confirmLabel:"삭제",confirmAction:"file-delete-run",danger:true});return;
+  }
+  if (action==="file-delete-run"){
+    const path=state.modal?.path;setModal(null);
+    if(!path)return;
+    try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files?path="+encodeURIComponent(path),{method:"DELETE"});
+      toast("파일이 삭제되었습니다.");state.selectedFile="";await loadFiles();
+    }catch(e){toast(e.message);}return;
   }
   if (action==="backup-create"){setModal({kind:"confirm",title:"새 백업을 생성할까요?",description:"현재 월드 상태를 백업합니다.",
     confirmLabel:"백업 생성",confirmAction:"backup-run"});return;}
@@ -1015,6 +1071,20 @@ document.addEventListener("submit",async(event) => {
   if(!["console-form","startup-form","settings-form","schedule-form","create-server-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="console-form"){await sendCommand();return;}
+  if(form.id==="file-editor-form"){
+    const path=state.modal?.path;if(!path)return;
+    try{const bytes=new Blob([String(new FormData(form).get("content")||"")],{type:"application/octet-stream"});
+      await uploadFile(state.selectedId,path,bytes);setModal(null);toast("파일을 저장했습니다.");await loadFiles();}
+    catch(e){toast(e.message);}return;
+  }
+  if(form.id==="folder-create-form" || form.id==="file-rename-form"){
+    const name=String(new FormData(form).get("name")||"").trim();if(!name)return;
+    try{
+      if(form.id==="folder-create-form")await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files/mkdir",{method:"POST",body:{path:relativeFile(name)}});
+      else await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files/rename",{method:"PATCH",body:{from:relativeFile(state.modal?.name||""),to:relativeFile(name)}});
+      setModal(null);state.selectedFile="";await loadFiles();toast("파일 작업이 완료되었습니다.");
+    }catch(e){toast(e.message);}return;
+  }
   if(form.id==="startup-form"){
     const d=new FormData(form);
     const input={executable:String(d.get("executable")||""),directory:String(d.get("directory")||""),
