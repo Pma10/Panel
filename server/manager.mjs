@@ -129,7 +129,9 @@ export class MinecraftManager {
     assert(!this.active.has(id),409,"서버가 이미 실행 중입니다.");
     assert(cfg.eulaAccepted,409,"Minecraft EULA 동의가 필요합니다.");
     const folder=this.dir(id);
-    const jar=await confinedPath(folder,cfg.jar);
+    let jar;
+    try{jar=await confinedPath(folder,cfg.jar);}
+    catch(e){if(e.code==="ENOENT")throw new HttpError(409,"서버 JAR 파일이 없습니다. 파일 관리에서 "+cfg.jar+"를 업로드하세요.");throw e;}
     assert((await stat(jar)).isFile(),409,"실행 JAR 파일이 없습니다.");
     const child=spawn(this.javaBin,["-Xms"+Math.min(512,cfg.memoryMb)+"M","-Xmx"+cfg.memoryMb+"M","-jar",cfg.jar,"nogui"],{
       cwd:folder,env:{...process.env},stdio:["pipe","pipe","pipe"],shell:false,windowsHide:true
