@@ -505,6 +505,14 @@ function renderAudit() {
       </tbody></table></div>`)}${demoNote()}`;
 }
 function renderSettings() {
+  if(state.mode==="live")return header("패널 설정","브라우저에 적용되는 표시 옵션과 보안 안내")+
+    card("화면 설정",'<div class="info-list"><div class="info-line"><div><strong>어두운 테마</strong>'+
+      '<p>브라우저에만 저장되는 화면 설정입니다.</p></div>'+
+      '<button class="switch '+(state.theme==="dark"?"on":"")+'" role="switch" type="button" aria-checked="'+(state.theme==="dark")+'" aria-label="다크 모드" data-action="theme-toggle"></button></div></div>')+
+    card("관리자 보안",'<div class="info-list"><div class="info-line"><div><strong>단일 관리자 세션</strong>'+
+      '<p>세션 만료 시간은 8시간입니다. 관리자 비밀번호는 서버 환경 변수에서만 변경할 수 있습니다.</p></div>'+
+      button("로그아웃","logout")+'</div></div>')+
+    '<p class="hint">백업 보관 정책과 세션 유효 시간을 변경하는 UI는 아직 제공되지 않습니다.</p>';
   const st = state.settings;
   return `${header("설정","브라우저 화면 설정을 관리합니다. 서버 정책은 변경되지 않습니다")}
     <form id="settings-form" class="stack"><section class="card settings-card"><h2>기본 설정</h2>
