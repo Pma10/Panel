@@ -120,8 +120,8 @@ export async function makePanel({root=process.env.PANEL_DATA_DIR||"./.panel-data
     }
     if(rest==="startup"){
       if(method==="GET"){
-        const {name,memoryMb,jar,eulaAccepted,port}=manager.get(id);
-        return json(res,200,{name,memoryMb,jar,eulaAccepted,port});
+        const {name,memoryMb,jar,eulaAccepted,port,autoRestart,template,installedVersion}=manager.get(id);
+        return json(res,200,{name,memoryMb,jar,eulaAccepted,port,autoRestart:Boolean(autoRestart),template:template||"manual",installedVersion:installedVersion||null});
       }
       requireMethod(method,"PATCH");
       return json(res,200,await manager.update(id,await body(req)));
