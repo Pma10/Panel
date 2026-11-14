@@ -323,3 +323,22 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
   .summary-secondary { padding-left: 0; border-left: 0; }
   .page-heading { flex-wrap: wrap; }
 }
+
+/* Stable, small DOM footprint for large server fleets. */
+.server-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  color: var(--secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.pagination-buttons { display: flex; align-items: center; gap: 10px; }
+.pagination-buttons > span { min-width: 48px; text-align: center; }
+@media (max-width: 500px) {
+  .server-pagination { padding: 12px; gap: 8px; flex-wrap: wrap; }
+  .pagination-buttons { margin-left: auto; }
+}
