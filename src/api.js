@@ -25,7 +25,12 @@ export async function apiRequest(path,{method="GET",body,headers={},timeoutMs=20
   });
   if(!response.ok){
     const message=await response.json().catch(()=>null);
-    if(response.status===401)setCsrf("");
+    if(response.status===401){
+      setCsrf("");
+      if(path!=="/auth/session" && path!=="/auth/login" && typeof window!=="undefined" && typeof Event!=="undefined"){
+        window.dispatchEvent(new Event("pconn-session-expired"));
+      }
+    }
     const error=new Error(message?.message||"API 요청 실패 ("+response.status+")");
     error.status=response.status;throw error;
   }
