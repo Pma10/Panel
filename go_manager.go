@@ -56,6 +56,9 @@ type managedServer struct{
  busy bool
  logs []logEntry
  subscribers map[chan logEntry]struct{}
+ mcStatus *minecraftStatus
+ memoryGB float64
+ memoryValid bool
 }
 type manager struct{
  mu sync.Mutex
@@ -85,6 +88,7 @@ func newManager(root,javaBin string)(*manager,error){
   }
  }
  go m.scheduleLoop()
+ go m.statusLoop()
  return m,nil
 }
 func isHex(s string)bool{_,err:=hex.DecodeString(s);return err==nil}
@@ -104,11 +108,18 @@ func (m *manager) saveLocked()error{
 func (m *manager) describe(s *managedServer)map[string]any{
  state,uptime:="stopped","—"
  if s.process!=nil{state=s.process.state;uptime=fmt.Sprintf("%d초",int(time.Since(s.process.started).Seconds()))}
+ var players,maxPlayers,mem any
+ version:=s.cfg.InstalledVersion
+ if s.mcStatus!=nil&&time.Since(s.mcStatus.CheckedAt)<60*time.Second{
+  players=s.mcStatus.Players;maxPlayers=s.mcStatus.MaxPlayers
+  if s.mcStatus.Version!=""{version=s.mcStatus.Version}
+ }
+ if s.memoryValid{mem=s.memoryGB}
  return map[string]any{
   "id":s.cfg.ID,"name":s.cfg.Name,"kind":"마인크래프트","status":state,
-  "memoryMb":s.cfg.MemoryMb,"memoryLimitGb":float64(s.cfg.MemoryMb)/1024,"memoryGb":nil,
-  "players":nil,"maxPlayers":nil,"tps":nil,"mspt":nil,"cpu":nil,"port":s.cfg.Port,
-  "jar":s.cfg.Jar,"version":s.cfg.InstalledVersion,"directory":m.dir(s.cfg.ID),"uptime":uptime,
+  "memoryMb":s.cfg.MemoryMb,"memoryLimitGb":float64(s.cfg.MemoryMb)/1024,"memoryGb":mem,
+  "players":players,"maxPlayers":maxPlayers,"tps":nil,"mspt":nil,"cpu":nil,"port":s.cfg.Port,
+  "jar":s.cfg.Jar,"version":version,"directory":m.dir(s.cfg.ID),"uptime":uptime,
   "eulaAccepted":s.cfg.EulaAccepted,"autoRestart":s.cfg.AutoRestart,
   "template":s.cfg.Template,"installedVersion":s.cfg.InstalledVersion,
  }
@@ -240,7 +251,7 @@ func (m *manager) start(id string)(map[string]any,error){
   err:=cmd.Wait()
   stdin.Close()
   m.mu.Lock()
-  if s.process==p{s.process=nil}
+  if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false}
   m.mu.Unlock()
   if err!=nil{m.log(id,"WARN","Java 종료: "+err.Error())}else{m.log(id,"INFO","Java 정상 종료")}
   close(p.done)
