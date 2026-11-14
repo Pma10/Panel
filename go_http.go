@@ -1,6 +1,7 @@
 package main
 
 import (
+ "bytes"
  "encoding/json"
  "errors"
  "fmt"
@@ -76,7 +77,7 @@ func (a *panelAPI)ServeHTTP(w http.ResponseWriter,r *http.Request){
  if err!=nil{http.NotFound(w,r);return}
  if file=="/index.html"{h.Set("Cache-Control","no-cache")}else{h.Set("Cache-Control","public, max-age=3600")}
  h.Set("Content-Type",mime.TypeByExtension(filepath.Ext(relative)))
- http.ServeContent(w,r,relative,time.Time{},strings.NewReader(string(data)))
+ http.ServeContent(w,r,relative,time.Time{},bytes.NewReader(data))
 }
 func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
  url:=strings.TrimPrefix(r.URL.Path,"/api/v1/")
