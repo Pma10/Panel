@@ -384,7 +384,7 @@ export class MinecraftManager {
   }
   startScheduler(){
     if(this.scheduleTimer)return;
-    const formatter=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Seoul",hour12:false,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",weekday:"short"});
+    const formatter=new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Seoul",hour12:false,hourCycle:"h23",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",weekday:"short"});
     const weekdays={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
     const tick=async()=>{
       if(this.stopped)return;
