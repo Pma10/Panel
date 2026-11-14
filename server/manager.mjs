@@ -9,7 +9,7 @@ import { Transform } from "node:stream";
 import { HttpError, assert, stringValue, positiveInt, confinedPath, safeRelative } from "./security.mjs";
 import { pingMinecraft } from "./ping.mjs";
 
-const MAX_LOGS=1200, MAX_LOG_LENGTH=4096, MAX_UPLOAD=256*1024*1024;
+const MAX_LOGS=400, MAX_LOG_LENGTH=2048, MAX_UPLOAD=256*1024*1024;
 const MAX_BACKUP_BYTES=8*1024*1024*1024, MAX_FILES=100_000;
 const JAVA_MEMORY_MIN=512, JAVA_MEMORY_MAX=32768;
 const now=()=>new Date().toISOString();
@@ -27,7 +27,7 @@ export class MinecraftManager {
     this.javaBin=javaBin;
     this.servers=new Map();this.active=new Map();this.logs=new Map();
     this.events=new EventEmitter();this.events.setMaxListeners(256);
-    this.busy=new Set();this.stopped=false;this.scheduleTimer=null;
+    this.busy=new Set();this.creating=false;this.stopped=false;this.scheduleTimer=null;
     this.statuses=new Map();this.statusPollTimer=null;this.polling=false;
   }
   async init() {
@@ -98,6 +98,8 @@ export class MinecraftManager {
     assert(typeof eulaAccepted==="boolean",400,"EULA 동의 값이 올바르지 않습니다.");
     assert(![...this.servers.values()].some(s=>s.port===port),409,"이미 사용 중인 서버 포트입니다.");
     assert(this.servers.size<100,409,"최대 서버 100개까지 등록할 수 있습니다.");
+    assert(!this.creating,409,"서버 생성 작업이 이미 진행 중입니다.");
+    this.creating=true;
     const id=makeId(),dir=join(this.serversDir,id);
     await mkdir(dir,{mode:0o700});
     const cfg={id,name,memoryMb,port,jar:"server.jar",eulaAccepted,createdAt:now(),schedules:[]};
@@ -106,7 +108,8 @@ export class MinecraftManager {
       await writeFile(join(dir,"server.properties"),"server-port="+port+"\nonline-mode=true\nenable-rcon=false\n");
       this.servers.set(id,cfg);this.logs.set(id,[]);
       await this.persist();
-    }catch(error){this.servers.delete(id);this.logs.delete(id);await rm(dir,{recursive:true,force:true});throw error;}
+    }catch(error){this.creating=false;this.servers.delete(id);this.logs.delete(id);await rm(dir,{recursive:true,force:true});throw error;}
+    this.creating=false;
     return this.summary(cfg);
   }
   async update(id,input) {
