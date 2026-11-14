@@ -130,6 +130,10 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   if err:=assertMethod(r,"GET");err!=nil{return err}
   jsonReply(w,200,map[string]any{"entries":a.audit.read()});return nil
  }
+ if url=="diagnostics"{
+  if err:=assertMethod(r,"GET");err!=nil{return err}
+  jsonReply(w,200,a.manager.diagnostics());return nil
+ }
  if url=="templates"{
   if err:=assertMethod(r,"GET");err!=nil{return err}
   jsonReply(w,200,map[string]any{"templates":templateCatalogue()});return nil
