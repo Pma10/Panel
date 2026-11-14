@@ -89,12 +89,41 @@ func newManager(root,javaBin string)(*manager,error){
    if len(c.ID)!=16 || !isHex(c.ID){continue}
    if c.Jar==""{c.Jar="server.jar"}
    m.servers[c.ID]=&managedServer{cfg:c,subscribers:map[chan logEntry]struct{}{}}
+   m.loadPreviousLog(c.ID)
   }
  }
  go m.scheduleLoop()
  go m.statusLoop()
  return m,nil
 }
+func (m *manager)loadPreviousLog(id string){
+ logfile:=filepath.Join(m.dir(id),"logs","latest.log")
+ file,err:=os.Open(logfile);if err!=nil{return}
+ defer file.Close()
+ info,err:=file.Stat();if err!=nil||!info.Mode().IsRegular(){return}
+ const maxTail int64=64*1024
+ offset:=int64(0)
+ if info.Size()>maxTail{
+  offset=info.Size()-maxTail
+  if _,err=file.Seek(offset,io.SeekStart);err!=nil{return}
+ }
+ buf,err:=io.ReadAll(io.LimitReader(file,maxTail));if err!=nil{return}
+ lines:=strings.Split(string(buf),"\n")
+ if offset>0 && len(lines)>0{lines=lines[1:]}
+ if len(lines)>100{lines=lines[len(lines)-100:]}
+ loaded:=[]logEntry{}
+ for _,line:=range lines{
+  line=strings.TrimSpace(line)
+  if line==""{continue}
+  if len(line)>2048{line=line[:2048]}
+  level:="INFO"
+  if strings.Contains(line,"/ERROR")||strings.Contains(line," [ERROR]"){level="ERROR"
+  }else if strings.Contains(line,"/WARN")||strings.Contains(line," [WARN]"){level="WARN"}
+  loaded=append(loaded,logEntry{Time:"이전",Level:level,Message:line})
+ }
+ if state:=m.servers[id];state!=nil{state.logs=loaded}
+}
+
 func isHex(s string)bool{_,err:=hex.DecodeString(s);return err==nil}
 func (m *manager) get(id string)(*managedServer,error){
  s,ok:=m.servers[id];if !ok{return nil,apiError{404,"서버를 찾을 수 없습니다."}};return s,nil
