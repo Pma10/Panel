@@ -182,3 +182,53 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
  m.log(id,"INFO","공식 "+project+" "+version+" "+verb+" 완료")
  return map[string]any{"project":project,"version":version,"size":size,"sha256":hex.EncodeToString(hash.Sum(nil)),"buildId":selected.ID,"updated":updating},nil
 }
+
+/** Switch the verified JAR back to the previous known version; never run while
+ *  a Minecraft process or another file/backup operation is active. */
+func (m *manager)rollbackJar(id string)(map[string]any,error){
+ m.mu.Lock()
+ state,err:=m.get(id)
+ if err!=nil{m.mu.Unlock();return nil,err}
+ if state.busy||state.process!=nil{m.mu.Unlock();return nil,apiError{409,"서버를 중지한 뒤 롤백하세요."}}
+ if state.cfg.RollbackVersion==""{m.mu.Unlock();return nil,apiError{404,"롤백할 이전 버전이 없습니다."}}
+ state.busy=true
+ m.mu.Unlock()
+ defer func(){m.mu.Lock();state.busy=false;m.mu.Unlock()}()
+ dir:=m.dir(id)
+ current:=filepath.Join(dir,"server.jar")
+ previous:=filepath.Join(dir,".panel-previous.jar")
+ for _,name:=range []string{current,previous}{
+  info,err:=os.Lstat(name)
+  if err!=nil||!info.Mode().IsRegular(){return nil,apiError{409,"이전 버전 JAR이 없거나 안전한 파일이 아닙니다."}}
+ }
+ temporary:=filepath.Join(dir,".panel-"+makeID()+".swap")
+ if err:=os.Rename(current,temporary);err!=nil{return nil,err}
+ if err:=os.Rename(previous,current);err!=nil{
+  _=os.Rename(temporary,current)
+  return nil,err
+ }
+ if err:=os.Rename(temporary,previous);err!=nil{
+  // The old JAR remains intact in temporary; do not delete it.
+  m.log(id,"WARN","JAR 롤백 후 이전 파일 정리 실패: "+temporary)
+  return nil,fmt.Errorf("JAR swap incomplete: %w",err)
+ }
+ m.mu.Lock()
+ oldCfg:=state.cfg
+ state.cfg.InstalledVersion,state.cfg.RollbackVersion=oldCfg.RollbackVersion,oldCfg.InstalledVersion
+ err=m.saveLocked()
+ if err!=nil{
+  state.cfg=oldCfg
+  // Best-effort rollback to the previous disk state. Retain files on error.
+  tmp2:=filepath.Join(dir,".panel-"+makeID()+".swap-failed")
+  if os.Rename(current,tmp2)==nil{
+   if os.Rename(previous,current)==nil{
+    _=os.Rename(tmp2,previous)
+   }else{_ = os.Rename(tmp2,current)}
+  }
+ }
+ newVersion:=state.cfg.InstalledVersion
+ m.mu.Unlock()
+ if err!=nil{return nil,err}
+ m.log(id,"WARN","서버 JAR 롤백 완료: "+newVersion)
+ return map[string]any{"restored":true,"version":newVersion},nil
+}
