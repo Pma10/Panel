@@ -121,10 +121,30 @@ func (m *manager)restore(ctx context.Context,id,backupID string)(map[string]any,
  if len(backupID)!=16||!isHex(backupID){return nil,apiError{400,"백업 ID가 올바르지 않습니다."}}
  _,release,err:=m.beginBackup(id);if err!=nil{return nil,err}
  defer release()
- origin:=filepath.Join(m.root,"backups",id,backupID,"files")
+ backupRoot:=filepath.Join(m.root,"backups",id,backupID)
+ backupInfo,err:=os.Lstat(backupRoot)
+ if errors.Is(err,os.ErrNotExist){return nil,apiError{404,"백업을 찾을 수 없습니다."}}
+ if err!=nil{return nil,err}
+ if !backupInfo.IsDir()||backupInfo.Mode()&os.ModeSymlink!=0{
+  return nil,apiError{403,"백업 폴더가 안전하지 않습니다."}
+ }
+ metadataBytes,err:=os.ReadFile(filepath.Join(backupRoot,"meta.json"))
+ if err!=nil{return nil,apiError{409,"백업 메타데이터를 읽을 수 없습니다."}}
+ var metadata backupMeta
+ if json.Unmarshal(metadataBytes,&metadata)!=nil||metadata.ID!=backupID||metadata.ServerID!=id||
+    metadata.Size<0||metadata.Size>maxBackupBytes||metadata.Files<0||metadata.Files>maxBackupFiles{
+  return nil,apiError{409,"다른 서버의 백업이거나 메타데이터가 손상되었습니다."}
+ }
+ origin:=filepath.Join(backupRoot,"files")
  info,err:=os.Lstat(origin)
- if err!=nil||!info.IsDir(){return nil,apiError{404,"백업을 찾을 수 없습니다."}}
+ if err!=nil||!info.IsDir()||info.Mode()&os.ModeSymlink!=0{
+  return nil,apiError{409,"백업 파일 폴더가 안전하지 않거나 누락됐습니다."}
+ }
  current:=m.dir(id)
+ currentInfo,err:=os.Lstat(current)
+ if err!=nil||!currentInfo.IsDir()||currentInfo.Mode()&os.ModeSymlink!=0{
+  return nil,apiError{409,"현재 서버 폴더가 안전하지 않습니다."}
+ }
  stage:=filepath.Join(m.root,"servers",id+"."+makeID()+".restore")
  previous:=filepath.Join(m.root,"servers",id+"."+makeID()+".previous")
  defer os.RemoveAll(stage)
