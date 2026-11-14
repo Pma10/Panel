@@ -9,7 +9,7 @@ if(!["127.0.0.1","localhost","::1"].includes(host) && !origin.startsWith("https:
 }
 const app=await makePanel({origin});
 app.server.listen(port,host,()=>{
-  console.log("피컨 관리 패널: "+origin);
+  console.log("Panel 관리 패널: "+origin);
   console.log("관리 폴더: "+app.manager.root);
   console.log("관리자 비밀번호는 PANEL_ADMIN_PASSWORD 환경 변수에서 읽었습니다.");
 });
