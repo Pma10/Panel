@@ -4,23 +4,23 @@
 
 **추천 런타임은 Go 단일 실행 파일 + 내장 웹 UI**입니다. Node.js는 Go 운영 환경에서 필요하지 않습니다. 기존 Node 서버는 비교·전환 목적으로 유지합니다.
 
-
 > **이름 구분:** 제품명은 **Panel**입니다. 기존 설치 스크립트와 systemd 서비스 이름은 호환성을 위해 `pconn`을 유지하므로, 서비스 관리 명령은 `systemctl status pconn`입니다.
 
 ## 설치
 
-Go 1.23 이상과 서버 버전에 맞는 Java를 설치합니다.
+Go 1.23 이상과 서버 버전에 맞는 Java를 설치합니다. 아래는 Bash 로컬 실행 예제입니다.
 
 ```bash
-git clone --branch feat/unslop-panel-foundation https://github.com/Pma10/Panel.git
+git clone --branch main https://github.com/Pma10/Panel.git
 cd Panel
-gofmt -w *.go
 go build -trimpath -ldflags="-s -w" -o pconn .
-export PANEL_ADMIN_PASSWORD='12자 이상의 강력한 비밀번호'
+
+read -rsp 'Admin password (12+ chars): ' PANEL_ADMIN_PASSWORD && echo
+export PANEL_ADMIN_PASSWORD
 ./pconn
 ```
 
-Windows는 `go build -o pconn.exe .`와 PowerShell 환경 변수 설정을 사용합니다. 접속 주소는 `http://127.0.0.1:4173`입니다.
+Windows는 `go build -o pconn.exe .`와 PowerShell 환경 변수 설정을 사용합니다. 비밀번호 입력을 숨기는 예제는 [시작 가이드](getting-started.md)에 있습니다. 접속 주소는 `http://127.0.0.1:4173`입니다.
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -58,10 +58,9 @@ Java `-Xmx`는 힙 메모리 상한일 뿐 **실제 RSS·CPU·디스크 제한**
 ## 검증
 
 ```bash
-gofmt -w *.go
 go vet ./...
 go test -race -count=1 ./...
 go build -trimpath -o pconn .
 ```
 
-Go 테스트 워크플로를 추가했습니다. **GitHub Actions가 러너를 시작하지 못하는 상황이라 실제 CI 통과를 아직 확인하지 못했습니다.** 주요 서버를 전환하기 전 실서버 JAR과 운영 환경에서 테스트해야 합니다.
+백엔드의 로컬 검사 결과와 제외 항목은 [2026-11-16 검증 보고서](verification-2026-11-16.md)에 있습니다. **백엔드 검사 성공, 전체 저장소 CI 통과, 실제 서버 운영 검증은 서로 다릅니다.** GitHub Actions 실패 원인은 반환된 실행 단계 정보만으로 확정하지 못했습니다. 주요 서버를 전환하기 전에 전체 소스와 웹 자산을 포함한 검사, 실제 JAR 실행, 백업·복원과 운영 환경을 별도로 확인하세요.
