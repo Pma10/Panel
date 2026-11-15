@@ -1,0 +1,26 @@
+[Unit]
+Description=Panel - Minecraft Server Management (Go)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pconn
+Group=pconn
+WorkingDirectory=/opt/pconn
+EnvironmentFile=/etc/pconn/panel.env
+ExecStart=/opt/pconn/pconn
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=50
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pconn
+LimitNOFILE=8192
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,43 @@
+name: Go Backend
+
+on:
+  push:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'index.html'
+      - 'src/**'
+      - 'scripts/**'
+      - '.github/workflows/go.yml'
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'index.html'
+      - 'src/**'
+      - 'scripts/**'
+      - '.github/workflows/go.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Normalize Go source for static verification
+        run: gofmt -w *.go
+      - name: Validate shell installers
+        run: bash -n scripts/pconnctl-linux.sh scripts/verify-go.sh
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+      - name: Compile Linux binary
+        run: go build -trimpath -ldflags="-s -w" -o /tmp/pconn-go .

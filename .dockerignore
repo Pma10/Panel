@@ -1,0 +1,15 @@
+.git
+.github
+.panel-data
+node_modules
+**/.DS_Store
+*.zip
+*.log
+.env
+.env.*
+!*.example
+deploy
+docs
+scripts
+*.md
+tests
