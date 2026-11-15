@@ -48,13 +48,8 @@ func (m *manager) filePath(id,path string,allowMissing bool)(string,error){
  return current,nil
 }
 func (m *manager) beginMutation(id string)(func(),error){
- m.mu.Lock()
- s,err:=m.get(id)
- if err!=nil{m.mu.Unlock();return nil,err}
- if s.process!=nil||s.busy{m.mu.Unlock();return nil,apiError{409,"서버를 중지하고 현재 작업이 끝난 뒤 다시 시도하세요."}}
- s.busy=true
- m.mu.Unlock()
- return func(){m.mu.Lock();s.busy=false;m.mu.Unlock()},nil
+ _,release,err:=m.acquireMutation(id,true)
+ return release,err
 }
 func (m *manager) listFiles(id,rel string)([]map[string]any,error){
  dir,err:=m.filePath(id,rel,false);if err!=nil{return nil,err}
@@ -62,6 +57,7 @@ func (m *manager) listFiles(id,rel string)([]map[string]any,error){
  if len(entries)>10000{return nil,apiError{413,"폴더에 항목이 너무 많습니다."}}
  result:=make([]map[string]any,0,len(entries))
  for _,entry:=range entries{
+  if strings.HasPrefix(entry.Name(),".panel-"){continue}
   if entry.Type()&os.ModeSymlink!=0{continue}
   info,err:=entry.Info();if err!=nil{continue}
   if !info.Mode().IsRegular()&&!info.IsDir(){continue}
@@ -92,7 +88,7 @@ func (m *manager) readText(id,rel string)(string,error){
 func (m *manager) uploadFile(id,rel string,r io.Reader)(int64,error){
  release,err:=m.beginMutation(id);if err!=nil{return 0,err}
  defer release()
- if rel==""{return 0,apiError{400,"파일 이름을 지정하세요."}}
+ if rel==""||rel=="."{return 0,apiError{400,"파일 이름을 지정하세요."}}
  target,err:=m.filePath(id,rel,true);if err!=nil{return 0,err}
  temp:=filepath.Join(filepath.Dir(target),".panel-"+makeID()+".upload")
  file,err:=os.OpenFile(temp,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600);if err!=nil{return 0,err}
@@ -138,19 +134,19 @@ func (m *manager) uploadFile(id,rel string,r io.Reader)(int64,error){
 }
 func (m *manager) mkdirFile(id,rel string)error{
  release,err:=m.beginMutation(id);if err!=nil{return err};defer release()
- if rel==""{return apiError{400,"폴더 이름을 지정하세요."}}
+ if rel==""||rel=="."{return apiError{400,"폴더 이름을 지정하세요."}}
  full,err:=m.filePath(id,rel,true);if err!=nil{return err}
  return os.Mkdir(full,0700)
 }
 func (m *manager) deleteFile(id,rel string)error{
  release,err:=m.beginMutation(id);if err!=nil{return err};defer release()
- if rel==""{return apiError{400,"서버 루트 폴더는 삭제할 수 없습니다."}}
+ if rel==""||rel=="."{return apiError{400,"서버 루트 폴더는 삭제할 수 없습니다."}}
  full,err:=m.filePath(id,rel,false);if err!=nil{return err}
  return os.Remove(full) // Nonempty directories are not deleted recursively.
 }
 func (m *manager) renameFile(id,from,to string)error{
  release,err:=m.beginMutation(id);if err!=nil{return err};defer release()
- if from==""||to==""{return apiError{400,"파일 이름을 지정하세요."}}
+ if from==""||from=="."||to==""||to=="."{return apiError{400,"파일 이름을 지정하세요."}}
  old,err:=m.filePath(id,from,false);if err!=nil{return err}
  newPath,err:=m.filePath(id,to,true);if err!=nil{return err}
  if filepath.Dir(old)!=filepath.Dir(newPath){return apiError{400,"같은 폴더 안에서만 이름을 변경할 수 있습니다."}}

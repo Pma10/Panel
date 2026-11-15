@@ -1,7 +1,6 @@
 package main
 
 import (
- "bufio"
  "context"
  "crypto/rand"
  "encoding/hex"
@@ -185,7 +184,9 @@ func (m *manager) summary(id string)(map[string]any,error){
 func (m *manager) startup(id string)(serverConfig,error){
  m.mu.Lock();defer m.mu.Unlock()
  s,err:=m.get(id);if err!=nil{return serverConfig{},err}
- return s.cfg,nil
+ snapshot:=s.cfg
+ snapshot.Schedules=append([]schedule{},s.cfg.Schedules...)
+ return snapshot,nil
 }
 func (m *manager) create(c serverConfig)(map[string]any,error){
  if len(strings.TrimSpace(c.Name))==0||len(c.Name)>64{return nil,apiError{400,"서버 이름은 1~64자여야 합니다."}}
@@ -220,7 +221,7 @@ func validJar(name string)bool{
 func (m *manager) update(id string,body map[string]json.RawMessage)(map[string]any,error){
  m.mu.Lock();defer m.mu.Unlock()
  s,err:=m.get(id);if err!=nil{return nil,err}
- if s.process!=nil||s.busy{return nil,apiError{409,"서버를 중지한 후 수정하세요."}}
+ if err:=m.checkMutationLocked(s,true);err!=nil{return nil,err}
  old:=s.cfg;next:=old
  if v,ok:=body["name"];ok{if json.Unmarshal(v,&next.Name)!=nil||strings.TrimSpace(next.Name)==""||len(next.Name)>64{return nil,apiError{400,"이름이 올바르지 않습니다."}}}
  if v,ok:=body["memoryMb"];ok{if json.Unmarshal(v,&next.MemoryMb)!=nil||next.MemoryMb<512||next.MemoryMb>32768{return nil,apiError{400,"메모리가 올바르지 않습니다."}}}
@@ -280,37 +281,13 @@ func (m *manager) subscribe(id string)(<-chan logEntry,func(),error){
  ch:=make(chan logEntry,64);s.subscribers[ch]=struct{}{}
  return ch,func(){m.mu.Lock();defer m.mu.Unlock();if _,ok:=s.subscribers[ch];ok{delete(s.subscribers,ch);close(ch)}},nil
 }
-func scanLines(r io.Reader,cb func(string)){
- // Keep draining even if a plugin outputs a multi-megabyte line without a
- // newline. Stopping the reader would fill the OS pipe and stall the JVM.
- reader:=bufio.NewReaderSize(r,32*1024)
- line:=make([]byte,0,2048)
- truncated:=false
- flush:=func(){
-  if len(line)==0&&!truncated{return}
-  message:=strings.TrimRight(string(line),"\r\n")
-  if truncated{message+=" [로그 행 길이 제한으로 생략됨]"}
-  cb(message)
-  line=line[:0]
-  truncated=false
- }
- for{
-  segment,err:=reader.ReadSlice('\n')
-  if len(segment)>0{
-   available:=2048-len(line)
-   if available>0{
-    n:=len(segment)
-    if n>available{n=available}
-    line=append(line,segment[:n]...)
-   }
-   if len(segment)>available{truncated=true}
-  }
-  if err==nil{flush();continue}
-  if errors.Is(err,bufio.ErrBufferFull){continue}
-  flush()
-  if !errors.Is(err,io.EOF){cb("[console read error: "+err.Error()+"]")}
-  return
- }
+// Keep the reader adapter and exec.Cmd writer on the same bounded parser.
+// Maintaining two line parsers had made empty/final-line behavior diverge.
+func scanLines(r io.Reader, cb func(string)) {
+ writer := &boundedConsoleWriter{writeLog: cb}
+ _, err := io.CopyBuffer(writer, r, make([]byte, 32*1024))
+ writer.Flush()
+ if err != nil { cb("[console read error: " + err.Error() + "]") }
 }
 func (m *manager) start(id string)(map[string]any,error){
  m.mu.Lock()

@@ -1,6 +1,7 @@
 package main
 
 import (
+ "context"
  "encoding/json"
  "errors"
  "fmt"
@@ -277,27 +278,60 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
  }
  return apiError{404,"API를 찾을 수 없습니다."}
 }
-func (a *panelAPI)sse(w http.ResponseWriter,r *http.Request,id string)error{
- f,ok:=w.(http.Flusher);if !ok{return apiError{500,"스트리밍을 지원하지 않습니다."}}
- ch,done,err:=a.manager.subscribe(id);if err!=nil{return err}
- defer done()
- w.Header().Set("Content-Type","text/event-stream; charset=utf-8")
- w.Header().Set("Cache-Control","no-cache, no-transform")
- w.Header().Set("X-Accel-Buffering","no")
- io.WriteString(w,": connected\n\n");f.Flush()
- tick:=time.NewTicker(20*time.Second);defer tick.Stop()
- for{
-  select{
-  case <-r.Context().Done():return nil
-  case <-a.closed:return nil
-  case entry,ok:=<-ch:
-   if !ok{return nil}
-   raw,_:=json.Marshal(entry)
-   if _,err:=fmt.Fprintf(w,"data: %s\n\n",raw);err!=nil{return nil}
-   f.Flush()
-  case <-tick.C:
-   if _,err:=io.WriteString(w,": ping\n\n");err!=nil{return nil}
-   f.Flush()
-  }
- }
+// sseWriteTimeout bounds each network write independently; an idle healthy
+// console can remain connected without a short global HTTP WriteTimeout.
+const sseWriteTimeout = 5 * time.Second
+
+func (a *panelAPI) sse(w http.ResponseWriter, r *http.Request, id string) error {
+    token, session, err := a.auth.session(r)
+    if err != nil { return err }
+    if _, ok := w.(http.Flusher); !ok {
+        return apiError{500, "스트리밍을 지원하지 않습니다."}
+    }
+    ch, release, err := a.manager.subscribe(id)
+    if err != nil { return err }
+    defer release()
+    controller := http.NewResponseController(w)
+    defer controller.SetWriteDeadline(time.Time{})
+    writeFrame := func(frame string) error {
+        // Recheck before writing, even when a queued log wins the select at
+        // the same moment as expiry/revocation.
+        select {
+        case <-session.revoked: return context.Canceled
+        default:
+        }
+        if !time.Now().Before(session.expires) { return context.DeadlineExceeded }
+        deadline := time.Now().Add(sseWriteTimeout)
+        if session.expires.Before(deadline) { deadline = session.expires }
+        if err := controller.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+            return err
+        }
+        if _, err := io.WriteString(w, frame); err != nil { return err }
+        return controller.Flush()
+    }
+    w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+    w.Header().Set("Cache-Control", "no-cache, no-transform")
+    w.Header().Set("X-Accel-Buffering", "no")
+    if err := writeFrame(": connected\n\n"); err != nil { return nil }
+    tick := time.NewTicker(20 * time.Second)
+    defer tick.Stop()
+    expiry := time.NewTimer(time.Until(session.expires))
+    defer expiry.Stop()
+    for {
+        select {
+        case <-r.Context().Done(): return nil
+        case <-a.closed: return nil
+        case <-session.revoked: return nil
+        case <-expiry.C:
+            a.auth.logout(token)
+            return nil
+        case entry, ok := <-ch:
+            if !ok { return nil }
+            raw, err := json.Marshal(entry)
+            if err != nil { return nil }
+            if err := writeFrame("data: " + string(raw) + "\n\n"); err != nil { return nil }
+        case <-tick.C:
+            if err := writeFrame(": ping\n\n"); err != nil { return nil }
+        }
+    }
 }

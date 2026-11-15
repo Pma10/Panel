@@ -85,7 +85,7 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
  m.mu.Lock()
  s,err:=m.get(id)
  if err!=nil{m.mu.Unlock();return nil,err}
- if s.busy||s.process!=nil{m.mu.Unlock();return nil,apiError{409,"서버를 중지하고 설치하세요."}}
+ if err:=m.checkMutationLocked(s,true);err!=nil{m.mu.Unlock();return nil,err}
  if updating && (s.cfg.Template!=project||s.cfg.InstalledVersion==""){
   m.mu.Unlock()
   return nil,apiError{409,"다른 종류의 서버 JAR은 자동 업데이트하지 않습니다. 수동으로 교체하세요."}
@@ -200,7 +200,7 @@ func (m *manager)rollbackJar(id string)(map[string]any,error){
  m.mu.Lock()
  state,err:=m.get(id)
  if err!=nil{m.mu.Unlock();return nil,err}
- if state.busy||state.process!=nil{m.mu.Unlock();return nil,apiError{409,"서버를 중지한 뒤 롤백하세요."}}
+ if err:=m.checkMutationLocked(state,true);err!=nil{m.mu.Unlock();return nil,err}
  if state.cfg.RollbackVersion==""{m.mu.Unlock();return nil,apiError{404,"롤백할 이전 버전이 없습니다."}}
  state.busy=true
  m.mu.Unlock()

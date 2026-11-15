@@ -25,12 +25,7 @@ type backupMeta struct{
  Files int `json:"files"`
 }
 func (m *manager)beginBackup(id string)(*managedServer,func(),error){
- m.mu.Lock()
- s,err:=m.get(id)
- if err!=nil{m.mu.Unlock();return nil,nil,err}
- if s.busy||s.process!=nil{m.mu.Unlock();return nil,nil,apiError{409,"백업/복원 전에 서버를 중지하세요."}}
- s.busy=true;m.mu.Unlock()
- return s,func(){m.mu.Lock();s.busy=false;m.mu.Unlock()},nil
+ return m.acquireMutation(id,true)
 }
 func copySnapshot(ctx context.Context,source,target string)(int64,int,error){
  var total int64
@@ -92,13 +87,9 @@ func (m *manager) backups(id string)([]backupMeta,error){
 }
 func (m *manager)deleteBackup(id,backupID string)error{
  if len(backupID)!=16||!isHex(backupID){return apiError{400,"백업 ID가 올바르지 않습니다."}}
- m.mu.Lock()
- state,err:=m.get(id)
- if err!=nil{m.mu.Unlock();return err}
- if state.busy{m.mu.Unlock();return apiError{409,"다른 백업 또는 복원 작업이 진행 중입니다."}}
- state.busy=true
- m.mu.Unlock()
- defer func(){m.mu.Lock();state.busy=false;m.mu.Unlock()}()
+ _,release,err:=m.acquireMutation(id,false)
+ if err!=nil{return err}
+ defer release()
  folder:=filepath.Join(m.root,"backups",id,backupID)
  data,err:=os.ReadFile(filepath.Join(folder,"meta.json"))
  if errors.Is(err,os.ErrNotExist){return apiError{404,"백업이 존재하지 않습니다."}}
@@ -177,19 +168,24 @@ func (m *manager)addSchedule(id string,input schedule)(schedule,error){
  if !scheduleExpr.MatchString(input.Cron){return schedule{},apiError{400,"실행식: 분 시 * * * 또는 분 시 * * 요일"}}
  m.mu.Lock();defer m.mu.Unlock()
  s,err:=m.get(id);if err!=nil{return schedule{},err}
+ if err:=m.checkMutationLocked(s,false);err!=nil{return schedule{},err}
  if len(s.cfg.Schedules)>=25{return schedule{},apiError{409,"예약 작업을 25개 넘게 등록할 수 없습니다."}}
  input.ID=makeID();input.Enabled=true;input.LastRun=""
- s.cfg.Schedules=append(s.cfg.Schedules,input)
- if err:=m.saveLocked();err!=nil{return schedule{},err}
+ previous:=s.cfg.Schedules
+ s.cfg.Schedules=append(append([]schedule{},previous...),input)
+ if err:=m.saveLocked();err!=nil{s.cfg.Schedules=previous;return schedule{},err}
  return input,nil
 }
 func (m *manager)deleteSchedule(id,sid string)error{
  m.mu.Lock();defer m.mu.Unlock()
  s,err:=m.get(id);if err!=nil{return err}
+ if err:=m.checkMutationLocked(s,false);err!=nil{return err}
  for i,item:=range s.cfg.Schedules{
   if item.ID==sid{
-   s.cfg.Schedules=append(s.cfg.Schedules[:i],s.cfg.Schedules[i+1:]...)
-   return m.saveLocked()
+   previous:=s.cfg.Schedules
+   s.cfg.Schedules=append(append([]schedule{},previous[:i]...),previous[i+1:]...)
+   if err:=m.saveLocked();err!=nil{s.cfg.Schedules=previous;return err}
+   return nil
   }
  }
  return apiError{404,"예약 작업을 찾을 수 없습니다."}
