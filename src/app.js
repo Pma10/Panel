@@ -109,16 +109,16 @@ function renderChrome() {
     </nav>`;
 }
 const button = (label, action, kind = "", extra = "") => `<button type="button" class="btn ${kind}" data-action="${h(action)}" ${extra}>${label}</button>`;
-const header = (title, description, actions = "") => `<div class="page-heading"><div><h1>${h(title)}</h1><p>${h(description)}</p></div>${actions ? `<div class="page-actions">${actions}</div>` : ""}</div>`;
+const header = (title, description, actions = "") => `<div class="page-heading"><div><h1>${h(title)}</h1>${description ? `<p>${h(description)}</p>` : ""}</div>${actions ? `<div class="page-actions">${actions}</div>` : ""}</div>`;
 const card = (title, body, action = "") => `<section class="card"><div class="card-title"><h2>${h(title)}</h2>${action}</div>${body}</section>`;
-const demoNote = () => `<div class="demo-note">${icon("alert","small")} ${state.mode === "demo" ? "표시된 수치는 디자인 검토용 예시입니다. 실제 서버는 제어되지 않습니다." : "표시된 정보는 연결된 API를 기반으로 합니다."}</div>`;
-function renderServerRows(servers, withOpen = false) {
-  if (!servers.length) return `<tr><td colspan="${withOpen ? 5 : 4}"><div class="empty-state">${icon("server")}<strong>표시할 서버가 없습니다</strong><p>검색 조건을 변경하거나 연결 상태를 확인하세요.</p></div></td></tr>`;
-  return servers.map((s) => `<tr data-server-row="${h(s.id)}" data-filter-text="${h((s.name+" "+s.kind).toLowerCase())}" data-status="${h(s.status)}">
+const demoNote = () => state.mode === "demo" ? `<div class="demo-note">${icon("alert","small")} 표시된 수치는 디자인 검토용 예시입니다. 실제 서버는 제어되지 않습니다.</div>` : "";
+function renderServerRows(servers) {
+  if (!servers.length) return `<tr><td colspan="4"><div class="empty-state">${icon("server")}<strong>표시할 서버가 없습니다</strong><p>검색 조건을 변경하거나 연결 상태를 확인하세요.</p></div></td></tr>`;
+  return servers.map((s) => `<tr class="clickable-row" data-action="select-server" data-id="${h(s.id)}" data-server-row="${h(s.id)}" data-filter-text="${h((s.name+" "+s.kind).toLowerCase())}" data-status="${h(s.status)}">
     <td><strong class="server-name">${h(s.name)}</strong><span class="server-desc">${h(s.kind)}</span></td>
     <td>${badge(s.status)}</td>
     <td class="numeric">${fmtPlayers(s)}</td><td class="numeric">${formatMemory(s.memoryGb)}</td>
-    ${withOpen ? `<td><button class="table-link" data-action="select-server" data-id="${h(s.id)}">열기 →</button></td>` : ""}</tr>`).join("");
+    </tr>`).join("");
 }
 function renderDashboard() {
   const sum = serverSummary(state.servers);
@@ -149,8 +149,8 @@ function renderServers() {
         <option value="unmanaged" ${state.serverStatus === "unmanaged" ? "selected":""}>기존 Java 감지</option></select>
       <div class="toolbar-spacer"></div><span class="demo-ribbon">${state.servers.length}대 등록</span></div>
     ${card("서버 목록",`<div class="table-scroll"><table class="data-table">
-      <thead><tr><th>서버 이름</th><th>상태</th><th class="numeric">접속 인원</th><th class="numeric">메모리</th><th>관리</th></tr></thead>
-      <tbody id="server-results">${renderServerRows(state.servers.slice(0,SERVER_PAGE_SIZE),true)}</tbody></table></div><div class="server-pagination" id="server-pagination"></div>`)}
+      <thead><tr><th>서버 이름</th><th>상태</th><th class="numeric">접속 인원</th><th class="numeric">메모리</th></tr></thead>
+      <tbody id="server-results">${renderServerRows(state.servers.slice(0,SERVER_PAGE_SIZE))}</tbody></table></div><div class="server-pagination" id="server-pagination"></div>`)}
     ${demoNote()}`;
 }
 function powerButtons(s) {
@@ -162,14 +162,6 @@ function powerButtons(s) {
   return `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
     ${button(`${icon("power","small")} 서버 중지`,"power-confirm","danger",`data-power="stop"`)}`;
 }
-const statusDetail = (s) => ({
-  starting:"Java 프로세스가 실행됐고 서버 준비(Done) 메시지를 기다리는 중입니다.",
-  running:"서버가 접속을 받을 수 있는 상태입니다.",
-  stopping:"stop 명령을 보냈습니다. 월드 저장 후 종료됩니다 (최대 25초 후 강제 종료).",
-  restarting:"서버가 종료되어 잠시 후 자동으로 다시 시작합니다.",
-  stopped:"서버 프로세스가 실행 중이 아닙니다.",
-  unmanaged:"이전 패널이 실행한 Java 프로세스가 남아 있습니다."
-})[s?.status] || "";
 function renderOverview() {
   const s = server();
   if (!s) return emptyServer();
@@ -189,8 +181,8 @@ function renderOverview() {
     <strong>${h(value)}</strong><p>${h(note)}</p><div class="progress-track"><div class="progress-fill ${index ? "green" : ""}" style="width:${Math.min(100,Math.max(0,percent*100))}%"></div></div></div>`).join("");
   return `${header("서버 개요","서버 상태와 자원 사용량을 확인합니다")}
     <div class="card overview-head"><div class="server-glyph">${icon("server","large")}</div><div class="overview-title">
-    <h2>${h(s.name)}</h2><p>${h(s.version)} · 가동 ${h(s.uptime)}</p><p class="status-detail">${h(statusDetail(s))}</p></div>${badge(s.status)}<div class="page-actions">${action}</div></div>
-    <div class="card info-line auto-restart-line"><div><strong>종료 시 자동 재시작</strong><p>패널에서 중지하지 않았는데 서버가 꺼지면 다시 켭니다 (10분에 최대 3회).</p></div>
+    <h2>${h(s.name)}</h2><p>${h(s.version)} · 가동 ${h(s.uptime)}</p></div>${badge(s.status)}<div class="page-actions">${action}</div></div>
+    <div class="card info-line auto-restart-line"><div><strong>종료 시 자동 재시작</strong></div>
       <button class="switch ${s.autoRestart?"on":""}" role="switch" type="button" aria-checked="${Boolean(s.autoRestart)}" aria-label="종료 시 자동 재시작" data-action="auto-restart-toggle"></button></div>
     <div class="grid-stats">${metrics}</div><div class="two-col">${resources}</div>
     ${card("실행 환경",`<div class="info-list"><div class="info-line"><strong>실행 경로</strong><span class="right mono">${h(s.directory)}</span></div>
@@ -312,7 +304,7 @@ function renderConsole() {
         <input id="console-command" aria-label="서버 명령어" autocomplete="off" maxlength="512" placeholder="서버 명령어 입력 (↑/↓ 이전 명령)" value="${h(state.command)}"></label>
         <button class="btn primary command-send" type="submit">전송</button></form>
     </section>
-    <p class="console-help">${state.mode === "demo" ? "예시 모드: 입력한 명령은 실제 서버에 전송되지 않습니다." : "명령어는 현재 선택된 서버에 전송됩니다. 콘솔에서 stop을 입력하면 자동 재시작 없이 종료합니다. 더 오래된 기록은 '로그 파일'의 logs 폴더에서 확인하세요."}</p></div>`;
+    ${state.mode === "demo" ? '<p class="console-help">예시 모드: 입력한 명령은 실제 서버에 전송되지 않습니다.</p>' : ""}</div>`;
 }
 function rememberCommand(value) {
   const list = state.commandHistory.filter((item) => item !== value);
@@ -504,7 +496,7 @@ function renderLiveFiles(){
       return '<span class="crumb-sep">/</span><button class="crumb" data-action="file-goto" data-path="'+path+'" data-drop-folder="'+path+'">'+h(seg)+'</button>';}).join("");
   const list=visibleFiles();
   const allChecked=list.length>0&&list.every(f=>state.fileSelection.has(f.name));
-  return header("파일","서버 폴더 내부 · 서버가 실행 중이어도 편집·업로드할 수 있습니다")+
+  return header("파일","")+
     '<div class="toolbar file-toolbar"><div class="crumb-path">'+crumbs+'</div><div class="toolbar-spacer"></div>'+
       '<label class="search-field file-search">'+icon("search")+'<input class="field" id="file-search" placeholder="이 폴더에서 찾기" autocomplete="off" value="'+h(state.fileQuery)+'" aria-label="파일 찾기"></label>'+
       button("새 파일","file-new-file","small")+button("새 폴더","file-new-folder","small")+
@@ -520,7 +512,7 @@ function renderLiveFiles(){
       '<tbody id="file-tbody">'+renderFileRows()+'</tbody></table></div>'+
       '<div class="drop-hint">놓으면 이 폴더에 업로드합니다</div></section>'+
     (state.fileEntries.length>2000?'<p class="hint">처음 2000개 항목만 표시합니다. 찾기로 범위를 좁히세요.</p>':'')+
-    '<p class="hint">더블클릭으로 열기·편집 · Enter 열기 · F2 이름 변경 · Delete 삭제 · Backspace 상위 폴더 · Ctrl/Shift+클릭 다중 선택 · Ctrl+A 전체 선택 · 항목을 폴더나 경로로 끌어 이동 · 바탕화면에서 파일·폴더를 끌어와 업로드</p>';
+    '';
 }
 
 function renderFiles() {
@@ -596,7 +588,7 @@ function renderJarUpgrade(st){
   const disabled=stopped?"":"disabled";
   return card("공식 서버 JAR 업데이트",
     '<p class="hint">현재 '+h(st.template)+' '+h(st.installedVersion||"버전 정보 없음")+
-    ' · 업데이트는 서버를 중지한 뒤 진행하며, 이전 JAR은 롤백용으로 보관됩니다.</p>'+
+    '</p>'+
     '<form id="jar-upgrade-form" class="stack" style="margin-top:18px">'+
       '<div class="form-group"><label for="jar-upgrade-version">설치할 안정 버전</label>'+
       '<select id="jar-upgrade-version" name="version" class="select" required '+disabled+'>'+
@@ -607,7 +599,7 @@ function renderJarUpgrade(st){
       '</div></form>'+
     (st.rollbackVersion?'<div class="info-line" style="margin-top:16px"><span>이전 버전: '+h(st.rollbackVersion)+
       '</span>'+button("이전 JAR로 롤백","jar-rollback","danger",disabled)+'</div>':"")+
-    '<p class="hint">Java 프로세스를 자동으로 재시작하지 않습니다. 월드 호환성을 확인하고 중요한 데이터는 별도 백업하세요.</p>');
+    '');
 }
 // Mirrors defaultStartCommand and splitCommand in go_java.go.
 const DEFAULT_START_COMMAND = "{java} -Xms512M -Xmx{memory}M -Dterminal.jline=false -Dterminal.ansi=true -jar {jar} nogui";
@@ -670,12 +662,12 @@ function renderLiveStartup(){
     '<section class="card settings-card"><div class="card-title"><h2>실행 명령어</h2>'+button("기본값으로","startup-command-reset","small")+'</div>'+
       '<div class="form-group"><label for="live-command">명령어 (비워 두면 기본값)</label>'+
       '<input class="field mono" id="live-command" name="live-command" value="'+h(st.startCommand||"")+'" placeholder="'+h(DEFAULT_START_COMMAND)+'" autocomplete="off" spellcheck="false"></div>'+
-      '<p class="hint">{java} {memory} {jar} {port} 값이 자동으로 채워집니다. 공백이 들어간 인자는 "큰따옴표"로 감싸세요. 셸을 거치지 않으므로 &amp;&amp;, | 같은 셸 문법은 쓸 수 없습니다 (필요하면 bash start.sh 처럼 스크립트를 실행하세요).</p>'+
+      '<p class="hint">{java} {memory} {jar} {port} · 공백이 든 인자는 "따옴표"</p>'+
       '<div class="form-group"><label>실제 실행될 명령</label><div class="command-preview mono" id="command-preview">'+h(previewCommand(startupFormValues()))+'</div></div></section>'+
     '<section class="card settings-card"><h2>동작</h2>'+
       '<label class="checkbox-label"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
       '<label class="checkbox-label" style="margin-top:12px"><input name="live-auto-restart" type="checkbox" '+(st.autoRestart?'checked':'')+'> 서버가 종료되면 자동으로 다시 시작</label>'+
-      '<p class="hint">패널의 중지 버튼이나 콘솔의 stop 명령으로 멈춘 경우는 다시 시작하지 않습니다. 10분 안에 3번 연속 종료되면 자동 재시작을 멈춥니다.</p></section>'+
+      '</section>'+
     '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>'+
     renderJarUpgrade(st);
 }
@@ -714,8 +706,7 @@ function renderLiveNetwork(){
     '<form class="card settings-card net-port-form" id="port-form"><h2>게임 포트 변경</h2><div class="inline-form">'+
       '<input class="field" id="new-port" name="port" type="number" min="1024" max="65535" required value="'+h(main?.port||"")+'">'+
       '<button class="btn primary" type="submit" '+(s?.status==="stopped"?'':'disabled')+'>포트 변경</button></div>'+
-      '<p class="hint">'+(s?.status==="stopped"?'':'서버를 중지해야 변경할 수 있습니다. ')+
-      (s?.template==="velocity"?'Velocity는 실행 명령어의 --port {port} 로 적용됩니다.':'server.properties의 server-port도 함께 바뀝니다.')+
+      (s?.status==="stopped"?'':'<p class="hint">서버를 중지해야 변경할 수 있습니다.</p>')+
       ' 외부 접속에는 공유기 포트 포워딩과 방화벽 허용이 필요합니다.</p></form>';
 }
 function renderLiveSchedules(){
@@ -748,7 +739,7 @@ function renderLiveHealth(){
           (status.memoryGb==null?'측정 중':Number(status.memoryGb).toFixed(2)+' GB')+'</span></div>'+
         '<div class="info-line"><strong>실행 시간</strong><span class="right">'+h(status.uptime||"—")+'</span></div>'+
       '</div>'))+
-    '<p class="hint">TPS, MSPT, 플레이어 수는 서버용 데이터 수집 플러그인 또는 별도 API가 연결되어야 실제 측정할 수 있습니다.</p>';
+    '';
 }
 function passwordRow(name,label,autocomplete="new-password"){
   return '<div class="form-group"><label for="'+h(name)+'">'+h(label)+'</label>'+
@@ -773,7 +764,7 @@ function renderLiveUsers(){
         passwordRow("next-password","새 비밀번호 (12자 이상)")+
         '<button class="btn" type="submit">비밀번호 변경</button></div></form>'+
     '</div></div>'+
-    '<p class="hint">모든 계정은 같은 관리 권한을 가집니다. 계정을 삭제하면 그 계정의 로그인 세션도 즉시 끊어집니다.</p>';
+    '';
 }
 function renderLiveAudit(){
   const entries=state.audit||[];
@@ -889,7 +880,7 @@ function renderSettings() {
       '<p>브라우저에만 저장되는 화면 설정입니다.</p></div>'+
       '<button class="switch '+(state.theme==="dark"?"on":"")+'" role="switch" type="button" aria-checked="'+(state.theme==="dark")+'" aria-label="다크 모드" data-action="theme-toggle"></button></div></div>')+
     card("계정 보안",'<div class="info-list"><div class="info-line"><div><strong>'+h(state.username)+' 계정으로 로그인됨</strong>'+
-      '<p>세션 만료 시간은 8시간입니다. 계정 추가·삭제와 비밀번호 변경은 계정 메뉴에서 할 수 있습니다.</p></div>'+
+      '</div>'+
       button("로그아웃","logout")+'</div></div>')+
     (state.diagnostics?card("Go 패널 메모리·성능 진단",
       '<div class="info-list">'+
@@ -904,7 +895,7 @@ function renderSettings() {
       '<div class="info-line"><strong>실시간 로그 연결</strong><span class="right">'+h(state.diagnostics.logSubscribers)+'</span></div>'+
       '<div class="info-line"><strong>GC 실행 횟수</strong><span class="right">'+h(state.diagnostics.goGCCycles)+'</span></div>'+
       '</div>'):'')+
-    '<p class="hint">Go 런타임 통계는 Java RSS와 다른 값입니다. 서버별 격리 및 실제 Java 전체 메모리 제한은 아직 제공하지 않습니다.</p>';
+    '';
   const st = state.settings;
   return `${header("설정","브라우저 화면 설정을 관리합니다. 서버 정책은 변경되지 않습니다")}
     <form id="settings-form" class="stack"><section class="card settings-card"><h2>기본 설정</h2>
@@ -963,7 +954,7 @@ function modalBody() {
   if (m.kind === "create") return `<div class="modal-scrim" data-action="modal-background">
     <form class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" id="create-server-form">
       <h2 id="modal-title">새 서버 추가</h2>
-      <p>마인크래프트 서버의 기본 정보를 입력합니다. ${state.mode==="demo"?"추가되는 서버는 예시 목록에만 반영됩니다.":"서버 생성은 API에 요청됩니다."}</p>
+      ${state.mode==="demo"?"<p>추가되는 서버는 예시 목록에만 반영됩니다.</p>":""}
       <div class="stack"><div class="form-group"><label for="new-server-name">서버 이름</label>
         <input id="new-server-name" name="server-name" class="field" maxlength="64" required placeholder="예: PvP Practice"></div>
       <div class="field-grid">
@@ -982,11 +973,11 @@ function modalBody() {
         <select id="new-server-version" name="server-version" class="select" disabled>
           <option value="">템플릿을 먼저 선택하세요</option>
         </select>
-        <small class="hint" id="new-server-version-hint">PaperMC 공식 API에서 안정 빌드 버전을 확인합니다.</small>
+        <small class="hint" id="new-server-version-hint"></small>
       </div>
       <label class="checkbox-label"><input name="eula-accepted" type="checkbox" required>
         <span><a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener noreferrer">Minecraft EULA</a>를 읽고 동의합니다.</span></label>
-      <p class="hint">Paper·Purpur·Leaf·Folia·Velocity는 공식 배포처에서 받은 JAR을 체크섬으로 검증해 자동 설치합니다. 그 밖의 서버는 생성 후 파일 화면에서 server.jar을 업로드하세요.</p></div>
+      </div>
       <div class="modal-actions" style="margin-top:25px"><button class="btn" type="button" data-action="modal-close">취소</button>
         <button class="btn primary" type="submit">서버 추가</button></div>
     </form></div>`;
@@ -994,7 +985,7 @@ function modalBody() {
     '<div class="editor-head"><h2 id="modal-title" class="mono">'+h(m.path)+'</h2><span class="editor-state '+(m.dirty?'dirty':'')+'" id="editor-state">'+(m.dirty?"수정됨":"저장됨")+'</span></div>'+
     '<div class="monaco-host" id="monaco-host" hidden></div>'+
     '<textarea class="file-editor" id="file-editor-text" name="content" spellcheck="false" wrap="off">'+h(m.content)+'</textarea>'+
-    '<div class="modal-actions"><span class="hint">Ctrl+S 저장 · Tab 들여쓰기 · UTF-8 텍스트 (최대 1MiB) · 실행 중에도 저장할 수 있습니다</span><span class="toolbar-spacer"></span>'+
+    '<div class="modal-actions"><span class="hint">Ctrl+S 저장</span><span class="toolbar-spacer"></span>'+
     '<button type="button" class="btn" data-action="modal-close">닫기</button>'+
     '<button class="btn primary" type="submit">저장</button></div></form></div>';
   if (m.kind==="file-mkdir" || m.kind==="file-rename" || m.kind==="file-new") {
@@ -1002,7 +993,7 @@ function modalBody() {
     const title={"file-mkdir":"새 폴더","file-rename":"이름 변경","file-new":"새 파일"}[m.kind];
     return '<div class="modal-scrim" data-action="modal-background">'+
     '<form class="modal" id="'+formId+'" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
-    '<h2 id="modal-title">'+title+'</h2><p>'+h(state.filePath?"/"+state.filePath:"서버 루트")+' 폴더 안에 '+(m.kind==="file-rename"?"이름을 바꿉니다.":"만듭니다.")+'</p>'+
+    '<h2 id="modal-title">'+title+'</h2>'+
     '<div class="form-group"><label for="file-new-name">이름</label><input id="file-new-name" name="name" class="field" maxlength="100" required value="'+h(m.name||"")+'" autocomplete="off"></div>'+
     '<div class="modal-actions" style="margin-top:22px"><button type="button" class="btn" data-action="modal-close">취소</button>'+
     '<button type="submit" class="btn primary">확인</button></div></form></div>';
@@ -1024,8 +1015,8 @@ function renderLogin() {
   const setup = state.setupRequired;
   return '<main class="login-screen"><div class="login-brand"><strong>Panel</strong><small>마인크래프트 서버 관리</small></div>' +
     '<form class="login-card" id="'+(setup?'setup-form':'login-form')+'" autocomplete="on">' +
-      (setup?'<h1>첫 계정 만들기</h1><p>아직 계정이 없습니다. 이 패널을 관리할 계정을 만드세요.</p>':
-        '<h1>로그인</h1><p>패널 계정으로 로그인하세요.</p>') +
+      (setup?'<h1>첫 계정 만들기</h1>':
+        '<h1>로그인</h1>') +
       '<div class="form-group"><label for="login-username">아이디</label>' +
         '<input class="field" id="login-username" name="username" minlength="3" maxlength="32" autocomplete="username" required autofocus></div>' +
       '<div class="form-group"><label for="login-password">비밀번호'+(setup?' (12자 이상)':'')+'</label>' +
@@ -1034,9 +1025,6 @@ function renderLogin() {
         '<input class="field" id="login-password2" name="password2" type="password" minlength="12" maxlength="4096" autocomplete="new-password" required></div>':'') +
       (state.authError?'<div class="login-error" role="alert">'+h(state.authError)+'</div>':'') +
       '<button type="submit" class="btn primary login-submit">'+(setup?'계정 만들고 시작하기':'로그인')+'</button>' +
-      '<small class="login-footnote">'+(setup?'첫 계정은 이 화면에서 한 번만 만들 수 있습니다. 이후 계정은 로그인 후 계정 메뉴에서 추가합니다.':
-        'PANEL_ADMIN_PASSWORD로 운영하던 패널은 아이디 admin과 그 비밀번호로 로그인합니다.')+
-      ' 이 연결은 '+(location.protocol==="https:"?"HTTPS":"로컬 접속")+'입니다.</small>' +
     '</form></main>';
 }
 async function bootstrapAuth() {
@@ -1212,7 +1200,7 @@ function filterServerRows() {
   const pageCount = Math.max(1,Math.ceil(matches.length / SERVER_PAGE_SIZE));
   state.serverPage = Math.max(0,Math.min(state.serverPage,pageCount-1));
   const start = state.serverPage * SERVER_PAGE_SIZE;
-  rows.innerHTML = renderServerRows(matches.slice(start,start+SERVER_PAGE_SIZE),true);
+  rows.innerHTML = renderServerRows(matches.slice(start,start+SERVER_PAGE_SIZE));
   pagination.innerHTML = '<span>' + matches.length + '대 중 ' +
     (matches.length ? (start+1) : 0) + '–' + Math.min(start+SERVER_PAGE_SIZE,matches.length) + '대 표시</span>' +
     '<div class="pagination-buttons"><button class="btn small" data-action="server-page-prev" ' + (!state.serverPage ? 'disabled' : '') + '>이전</button>' +

@@ -418,7 +418,6 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
 /* ---- Status ---- */
 .status.busy .indicator { animation: status-pulse 1s ease-in-out infinite; }
 @keyframes status-pulse { 50% { opacity: .25; } }
-.status-detail { font-size: 12px; color: var(--secondary); margin-top: 4px; }
 .auto-restart-line { padding: 14px 20px; margin-bottom: 23px; }
 
 /* ---- File manager ---- */
@@ -503,3 +502,5 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
 .page .notice + .notice { margin-top: 8px; }
 .notice { margin-bottom: 12px; }
 @media (max-width: 760px) { .net-stats { grid-template-columns: repeat(2,minmax(0,1fr)); } .net-layout { grid-template-columns: 1fr; } }
+
+.clickable-row { cursor: pointer; }
