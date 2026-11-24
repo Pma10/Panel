@@ -25,6 +25,7 @@ function harness({live=false,request=async()=>null,stream=()=>()=>{}}={}) {
     ...fixtures, h:escapeHtml, filterLogs, serverSummary, formatMemory,
     validateCommand, routeFromHash, appendBoundedLog, replaceLogHistory, recentLogs,
     apiEnabled:live,apiRequest:request,streamLogs:stream,document:doc,
+    LANGUAGES:{ko:"한국어",en:"English"},detectLanguage:()=>"ko",startI18n(){},setLanguage(){},translate:(t)=>t,
     window:{addEventListener(){},scrollTo(){}},location,
     localStorage:{getItem(){return null;},setItem(){}},
     structuredClone,requestAnimationFrame(){},setTimeout,clearTimeout,

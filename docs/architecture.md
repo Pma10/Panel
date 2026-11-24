@@ -17,6 +17,7 @@
 | `go_manager.go` | 관리 서버 상태, Java 프로세스, 고정 크기 로그 순환 버퍼 |
 | `go_http.go` | 인증된 /api/v1 라우팅과 SSE, 임베디드 프런트엔드 |
 | `go_auth.go` | 계정(users.json, PBKDF2)·세션·요청 출처·CSRF |
+| `src/i18n.js`, `src/i18n-en.js` | 화면 번역: 한국어 원문을 사전·패턴으로 바꿈. 새 언어는 사전 파일 하나 추가 |
 | `go_java.go` | 설치된 Java 검색, 실행 명령어 템플릿 해석 |
 | `go_files.go` | 서버 디렉터리에 한정된 파일 스트리밍·업로드 |
 | `go_templates.go` | 공식 Paper/Folia 안정 JAR, 무결성 확인, 이전 버전 복구 |

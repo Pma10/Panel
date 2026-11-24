@@ -1,6 +1,7 @@
 
 import { DEMO_SERVERS, DEMO_LOGS, DEMO_ACTIVITY, DEMO_FILES, DEMO_BACKUPS, DEMO_SCHEDULES, DEMO_USERS, DEMO_AUDIT, ROUTE_INFO } from "./data.js";
 import { escapeHtml as h, filterLogs, serverSummary, formatMemory, validateCommand, routeFromHash, appendBoundedLog, replaceLogHistory, recentLogs } from "./utils.mjs";
+import { LANGUAGES, detectLanguage, startI18n, setLanguage, translate } from "./i18n.js";
 import { apiEnabled, apiRequest, streamLogs, getSession, signIn, signOut, setupAccount, uploadFile, fileDownloadUrl } from "./api.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -72,6 +73,7 @@ const statusText = (status) => ({
   running:"실행 중",stopped:"중지됨",starting:"시작 중",
   stopping:"종료 중",restarting:"재시작 대기",unmanaged:"기존 Java 감지"
 })[status] || "상태 알 수 없음";
+const uiLocale = () => document.documentElement.lang === "en" ? "en-US" : "ko-KR";
 const TRANSITIONAL = ["starting","stopping","restarting"];
 const badge = (status) => `<span class="status ${status === "running" ? "running" : status === "stopped" ? "stopped" : "warning"} ${TRANSITIONAL.includes(status) ? "busy" : ""}"><i class="indicator"></i>${statusText(status)}</span>`;
 const fmtPlayers = (s) => s.maxPlayers ? `${s.players ?? 0} / ${s.maxPlayers}` : "—";
@@ -372,7 +374,7 @@ function renderFileRows(){
       '<td class="file-check"><input type="checkbox" data-file-check="'+name+'" '+(sel?'checked':'')+' aria-label="'+name+' 선택"></td>'+
       '<td><span class="file-name">'+icon(folder?"folder":"file")+'<span>'+name+'</span></span></td>'+
       '<td class="numeric">'+(folder?"—":fileSize(f.size))+'</td>'+
-      '<td class="numeric">'+h(new Date(f.modified).toLocaleString("ko-KR",{dateStyle:"short",timeStyle:"short"}))+'</td>'+
+      '<td class="numeric">'+h(new Date(f.modified).toLocaleString(uiLocale(),{dateStyle:"short",timeStyle:"short"}))+'</td>'+
       '<td class="file-row-actions">'+
         (folder?'':'<button class="mini-btn" data-action="file-edit" data-name="'+name+'">편집</button>'+
           '<button class="mini-btn" data-action="file-download" data-name="'+name+'">받기</button>')+
@@ -449,7 +451,7 @@ async function uploadItems(items,dest){
   if(dest===state.filePath){
     const existing=new Set(state.fileEntries.map(f=>f.name));
     const conflicts=files.filter(i=>!i.path.includes("/")&&existing.has(i.path)).map(i=>i.path);
-    if(conflicts.length&&!confirm(conflicts.length+"개 파일을 덮어씁니다. 계속할까요?\n"+conflicts.slice(0,8).join("\n")))return;
+    if(conflicts.length&&!confirm(translate(conflicts.length+"개 파일을 덮어씁니다. 계속할까요?")+"\n"+conflicts.slice(0,8).join("\n")))return;
   }
   const dirs=new Set();
   for(const item of items){
@@ -575,7 +577,7 @@ function renderLiveBackups(){
       '<div class="card stat-card"><span>백업 개수</span><strong>'+list.length+'</strong></div>'+
       '<div class="card stat-card"><span>총 백업 크기</span><strong>'+fileSize(total)+'</strong></div></div>'+
     card("백업 목록",'<div class="info-list">'+(list.map(b=>
-      '<div class="info-line"><div><strong>'+h(b.id)+'</strong><p>'+h(new Date(b.createdAt).toLocaleString("ko-KR"))+
+      '<div class="info-line"><div><strong>'+h(b.id)+'</strong><p>'+h(new Date(b.createdAt).toLocaleString(uiLocale()))+
       ' · '+h(b.files)+'개 파일</p></div><span class="right">'+fileSize(b.size)+'</span>'+
       button("복원","backup-restore","small",'data-id="'+h(b.id)+'" '+(stopped?'':'disabled'))+
       button("삭제","backup-delete","danger",'data-id="'+h(b.id)+'"')+'</div>').join("")||
@@ -586,10 +588,9 @@ function renderJarUpgrade(st){
   if(!st || !["paper","folia","purpur","leaf","velocity"].includes(st.template))return "";
   const stopped=server()?.status==="stopped";
   const disabled=stopped?"":"disabled";
-  return card("공식 서버 JAR 업데이트",
-    '<p class="hint">현재 '+h(st.template)+' '+h(st.installedVersion||"버전 정보 없음")+
-    '</p>'+
-    '<form id="jar-upgrade-form" class="stack" style="margin-top:18px">'+
+  return card("공식 서버 JAR 업데이트",'<div class="card-body">'+
+    '<p class="hint">현재 '+h(st.template)+' '+h(st.installedVersion||"버전 정보 없음")+'</p>'+
+    '<form id="jar-upgrade-form" class="stack">'+
       '<div class="form-group"><label for="jar-upgrade-version">설치할 안정 버전</label>'+
       '<select id="jar-upgrade-version" name="version" class="select" required '+disabled+'>'+
         '<option value="">버전 목록을 불러오세요</option></select></div>'+
@@ -599,7 +600,7 @@ function renderJarUpgrade(st){
       '</div></form>'+
     (st.rollbackVersion?'<div class="info-line" style="margin-top:16px"><span>이전 버전: '+h(st.rollbackVersion)+
       '</span>'+button("이전 JAR로 롤백","jar-rollback","danger",disabled)+'</div>':"")+
-    '');
+    '</div>');
 }
 // Mirrors defaultStartCommand and splitCommand in go_java.go.
 const DEFAULT_START_COMMAND = "{java} -Xms512M -Xmx{memory}M -Dterminal.jline=false -Dterminal.ansi=true -jar {jar} nogui";
@@ -665,8 +666,8 @@ function renderLiveStartup(){
       '<p class="hint">{java} {memory} {jar} {port} · 공백이 든 인자는 "따옴표"</p>'+
       '<div class="form-group"><label>실제 실행될 명령</label><div class="command-preview mono" id="command-preview">'+h(previewCommand(startupFormValues()))+'</div></div></section>'+
     '<section class="card settings-card"><h2>동작</h2>'+
-      '<label class="checkbox-label"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
-      '<label class="checkbox-label" style="margin-top:12px"><input name="live-auto-restart" type="checkbox" '+(st.autoRestart?'checked':'')+'> 서버가 종료되면 자동으로 다시 시작</label>'+
+      '<div class="check-stack"><label class="checkbox-label"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
+      '<label class="checkbox-label"><input name="live-auto-restart" type="checkbox" '+(st.autoRestart?'checked':'')+'> 서버가 종료되면 자동으로 다시 시작</label></div>'+
       '</section>'+
     '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>'+
     renderJarUpgrade(st);
@@ -751,7 +752,7 @@ function renderLiveUsers(){
     '<div class="two-col users-layout">'+
     card("계정 목록",'<div class="info-list">'+(list.map(u=>
       '<div class="info-line"><div><strong>'+h(u.username)+(u.username===state.username?' <span class="status running">현재 계정</span>':'')+'</strong>'+
-      '<p>생성 '+h(u.created?new Date(u.created).toLocaleString("ko-KR"):"—")+'</p></div>'+
+      '<p>생성 '+h(u.created?new Date(u.created).toLocaleString(uiLocale()):"—")+'</p></div>'+
       (u.username===state.username?'':button("삭제","user-delete","small danger",'data-name="'+h(u.username)+'"'))+'</div>').join("")||
       '<div class="empty-state">계정 목록을 불러오는 중입니다.</div>')+'</div>')+
     '<div class="stack">'+
@@ -770,7 +771,7 @@ function renderLiveAudit(){
   const entries=state.audit||[];
   return header("감사 로그","실제 관리자 작업 기록")+liveViewStatus()+
   card("최근 작업",'<div class="table-scroll"><table class="data-table"><thead><tr><th>시각</th><th>작업</th><th>대상</th></tr></thead><tbody>'+
-    (entries.map(x=>'<tr><td>'+h(new Date(x.time).toLocaleString("ko-KR"))+'</td><td>'+h(x.action)+'</td>'+
+    (entries.map(x=>'<tr><td>'+h(new Date(x.time).toLocaleString(uiLocale()))+'</td><td>'+h(x.action)+'</td>'+
       '<td>'+h(x.serverId||"패널")+'</td></tr>').join("")||
       '<tr><td colspan="3" class="empty-state">아직 기록된 작업이 없습니다.</td></tr>')+
     '</tbody></table></div>');
@@ -874,9 +875,12 @@ function renderAudit() {
         <td>${h(entry.actor)}</td><td>${h(entry.target)}</td></tr>`).join("")}
       </tbody></table></div>`)}${demoNote()}`;
 }
+const languagePicker = () => '<div class="info-line"><div><strong>언어</strong></div>'+
+  '<select class="select" id="language-select" aria-label="언어" data-no-i18n>'+Object.entries(LANGUAGES).map(([code,name])=>
+    '<option value="'+code+'" '+(code===currentLanguage?'selected':'')+'>'+h(name)+'</option>').join("")+'</select></div>';
 function renderSettings() {
   if(state.mode==="live")return header("패널 설정","브라우저에 적용되는 표시 옵션과 보안 안내",button("메모리 상태 새로고침","diagnostics-refresh"))+
-    card("화면 설정",'<div class="info-list"><div class="info-line"><div><strong>어두운 테마</strong>'+
+    card("화면 설정",'<div class="info-list">'+languagePicker()+'<div class="info-line"><div><strong>어두운 테마</strong>'+
       '<p>브라우저에만 저장되는 화면 설정입니다.</p></div>'+
       '<button class="switch '+(state.theme==="dark"?"on":"")+'" role="switch" type="button" aria-checked="'+(state.theme==="dark")+'" aria-label="다크 모드" data-action="theme-toggle"></button></div></div>')+
     card("계정 보안",'<div class="info-list"><div class="info-line"><div><strong>'+h(state.username)+' 계정으로 로그인됨</strong>'+
@@ -1046,6 +1050,8 @@ async function bootstrapAuth() {
     if(state.authenticated){startPolling();await loadFromApi();}
   }
 }
+// Animate only when the page changes, not on every status refresh.
+let lastRenderedRoute = null;
 function render() {
   document.title = routeTitle() + " · Panel";
   const app = $("#app");
@@ -1064,10 +1070,11 @@ function render() {
       <button class="btn" style="margin-top:18px" data-action="api-retry">다시 시도</button></div>`;
   } else content = renderPage();
   app.innerHTML = `<div class="app-shell">${renderSidebar()}<div class="main-shell">${renderChrome()}
-    <main class="page ${state.route==="console"?"console-page":""}" id="main-content">${content}
+    <main class="page ${state.route==="console"?"console-page":""} ${state.route!==lastRenderedRoute?"route-enter":""}" id="main-content">${content}
       ${state.route!=="console"?`<div class="footer">Panel · ${state.mode==="demo"?"프런트엔드 시연":"서버 관리"} · <a href="https://github.com/Pma10/Panel" target="_blank" rel="noopener noreferrer">GitHub</a></div>`:""}
     </main></div></div><div id="modal-root">${modalBody()}</div><div id="toast-root" aria-live="polite"></div>`;
   if (state.modal?.kind === "file-editor") mountEditor();
+  lastRenderedRoute = state.route;
   if (state.route === "console") scrollLogs(state.autoScroll);
   if (state.route === "servers") filterServerRows();
 }
@@ -1242,7 +1249,7 @@ async function sendCommand() {
   const command = validateCommand(raw);
   if (!command.valid) return toast(command.error);
   if (state.mode === "demo") {
-    const now = new Date().toLocaleTimeString("ko-KR", { hour12:false });
+    const now = new Date().toLocaleTimeString(uiLocale(), { hour12:false });
     appendBoundedLog(state.logs,{time:now,level:"DEMO",message:"> "+command.value+" (실제 서버에 미전송)"});
     rememberCommand(command.value);
     state.command = "";
@@ -1277,7 +1284,7 @@ async function performPowerAction() {
   if (state.mode === "demo") {
     if (action === "stop") { s.status="stopped";s.players=0;s.memoryGb=0; }
     else { s.status="running"; }
-    appendBoundedLog(state.logs,{time:new Date().toLocaleTimeString("ko-KR",{hour12:false}),level:"DEMO",
+    appendBoundedLog(state.logs,{time:new Date().toLocaleTimeString(uiLocale(),{hour12:false}),level:"DEMO",
       message:"서버 "+({stop:"중지",start:"시작",restart:"재시작"}[action])+" UI 시뮬레이션 (실제 프로세스 변경 없음)"});
     toast("예시 상태만 변경했습니다. 실제 서버는 제어하지 않았습니다.");
     render(); return;
@@ -1483,7 +1490,7 @@ window.addEventListener("hashchange", async () => {
   connectLogStream();refreshRouteData(); window.scrollTo({top:0,behavior:"auto"});
 });
 function closeModal() {
-  if (state.modal?.kind==="file-editor" && state.modal.dirty && !confirm("저장하지 않은 변경 사항이 있습니다. 닫을까요?")) return;
+  if (state.modal?.kind==="file-editor" && state.modal.dirty && !confirm(translate("저장하지 않은 변경 사항이 있습니다. 닫을까요?"))) return;
   setModal(null);
 }
 const typingTarget = (el) => el && (el.isContentEditable || ["INPUT","TEXTAREA","SELECT"].includes(el.tagName));
@@ -1639,6 +1646,7 @@ document.addEventListener("change",async(event) => {
     }
     return;
   }
+  if (event.target.id==="language-select") { setLanguage(event.target.value); return; }
   if (event.target.id==="log-autoscroll") {state.autoScroll=event.target.checked;state.stickLogs=true;scrollLogs();}
   if (event.target.id==="server-status"){state.serverStatus=event.target.value;state.serverPage=0;filterServerRows();}
   if (["file-upload-input","folder-upload-input"].includes(event.target.id) && state.mode==="live"){
@@ -2032,6 +2040,8 @@ document.addEventListener("submit",async(event) => {
     }
   }
 });
+const currentLanguage = detectLanguage();
+startI18n(currentLanguage);
 render();
 window.addEventListener("pconn-session-expired",()=>{
   if(!apiEnabled)return;
