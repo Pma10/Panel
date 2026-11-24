@@ -64,7 +64,7 @@ func (a *panelAPI)ServeHTTP(w http.ResponseWriter,r *http.Request){
  h.Set("Referrer-Policy","no-referrer")
  h.Set("X-Frame-Options","DENY")
  h.Set("Permissions-Policy","camera=(), microphone=(), geolocation=()")
- h.Set("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+ h.Set("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data: https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
  if strings.HasPrefix(r.URL.Path,"/api/v1/"){
   if err:=a.route(w,r);err!=nil{apiFail(w,err)}
   return

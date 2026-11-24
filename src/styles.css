@@ -466,10 +466,14 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
 /* ---- Startup / Java ---- */
 .settings-card .card-title { padding: 0 0 12px; border-bottom: 0; }
 .java-list { display: grid; gap: 6px; margin-top: 10px; }
-.java-option { display: grid; grid-template-columns: 120px minmax(0,1fr) auto; gap: 10px; align-items: center; text-align: left; border: 1px solid var(--border); background: var(--paper); color: var(--ink); border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+.settings-card .card-title h2 { margin: 0; }
+.java-option { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; text-align: left; border: 1px solid var(--border); background: var(--paper); color: var(--ink); border-radius: 8px; padding: 8px 12px; font-size: 12px; }
 .java-option:hover { background: var(--field); }
 .java-option.active { border-color: #2563eb; background: var(--accent-soft); }
-.java-option span { overflow-wrap: anywhere; color: var(--secondary); }
-.java-option small { color: var(--muted); }
+.java-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.java-head small { color: var(--muted); white-space: nowrap; }
+.java-path { color: var(--secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .command-preview { background: var(--terminal); color: #dfe7f0; border-radius: 8px; padding: 10px 12px; font-size: 12px; overflow-wrap: anywhere; }
 .users-layout { grid-template-columns: minmax(0,1.4fr) minmax(285px,1fr); align-items: start; }
+.monaco-host { flex: 1; min-height: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.file-edit-dialog [hidden] { display: none !important; }

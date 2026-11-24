@@ -568,7 +568,8 @@ function renderJavaList(){
   if(!list.length)return '<p class="hint">설치된 Java를 찾지 못했습니다. 실행 파일 경로를 직접 입력하세요.</p>';
   const current=$("#live-java")?.value??state.startupLive?.javaBin??"";
   return list.map(j=>'<button type="button" class="java-option '+(current===j.path?'active':'')+'" data-action="java-pick" data-path="'+h(j.path)+'">'+
-    '<strong>Java '+h(j.version||"?")+'</strong><span class="mono">'+h(j.path)+'</span><small>'+h(j.source)+'</small></button>').join("");
+    '<span class="java-head"><strong>Java '+h(j.version||"?")+'</strong><small>'+h(j.source==="검색"?"자동 검색":j.source)+'</small></span>'+
+    '<span class="mono java-path" title="'+h(j.path)+'">'+h(j.path)+'</span></button>').join("");
 }
 function renderLiveStartup(){
   const st=state.startupLive;
@@ -583,7 +584,7 @@ function renderLiveStartup(){
     '</div></section>'+
     '<section class="card settings-card"><div class="card-title"><h2>Java 런타임 · {java}</h2>'+button("다시 찾기","java-detect","small")+'</div>'+
       '<div class="form-group"><label for="live-java">Java 실행 파일 경로</label>'+
-      '<input class="field mono" id="live-java" name="live-java" value="'+h(st.javaBin||"")+'" placeholder="비워 두면 패널 기본값 (PANEL_JAVA_BIN, 기본 java)" autocomplete="off"></div>'+
+      '<input class="field mono" id="live-java" name="live-java" value="'+h(st.javaBin||"")+'" placeholder="비워 두면 패널 기본 Java 사용" autocomplete="off"></div>'+
       '<div class="java-list" id="java-list">'+renderJavaList()+'</div></section>'+
     '<section class="card settings-card"><div class="card-title"><h2>실행 명령어</h2>'+button("기본값으로","startup-command-reset","small")+'</div>'+
       '<div class="form-group"><label for="live-command">명령어 (비워 두면 기본값)</label>'+
@@ -874,6 +875,7 @@ function modalBody() {
     </form></div>`;
   if (m.kind==="file-editor") return '<div class="modal-scrim" data-action="modal-background"><form class="modal file-edit-dialog" id="file-editor-form" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
     '<div class="editor-head"><h2 id="modal-title" class="mono">'+h(m.path)+'</h2><span class="editor-state '+(m.dirty?'dirty':'')+'" id="editor-state">'+(m.dirty?"수정됨":"저장됨")+'</span></div>'+
+    '<div class="monaco-host" id="monaco-host" hidden></div>'+
     '<textarea class="file-editor" id="file-editor-text" name="content" spellcheck="false" wrap="off">'+h(m.content)+'</textarea>'+
     '<div class="modal-actions"><span class="hint">Ctrl+S 저장 · Tab 들여쓰기 · UTF-8 텍스트 (최대 1MiB) · 실행 중에도 저장할 수 있습니다</span><span class="toolbar-spacer"></span>'+
     '<button type="button" class="btn" data-action="modal-close">닫기</button>'+
@@ -960,13 +962,67 @@ function render() {
     <main class="page ${state.route==="console"?"console-page":""}" id="main-content">${content}
       ${state.route!=="console"?`<div class="footer">Panel · ${state.mode==="demo"?"프런트엔드 시연":"서버 관리"} · <a href="https://github.com/Pma10/Panel" target="_blank" rel="noopener noreferrer">GitHub</a></div>`:""}
     </main></div></div><div id="modal-root">${modalBody()}</div><div id="toast-root" aria-live="polite"></div>`;
+  if (state.modal?.kind === "file-editor") mountEditor();
   if (state.route === "console") scrollLogs(state.autoScroll);
   if (state.route === "servers") filterServerRows();
 }
+// Monaco is vendored under src/vendor/monaco and loaded only when a file is
+// opened. The plain textarea stays as the form field and as a fallback.
+const MONACO_BASE = "/src/vendor/monaco/vs";
+let monacoPromise = null, activeEditor = null;
+function loadMonaco() {
+  if (window.monaco) return Promise.resolve(window.monaco);
+  if (!monacoPromise) monacoPromise = new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = MONACO_BASE + "/editor/editor.main.css";
+    document.head.appendChild(css);
+    const script = document.createElement("script");
+    script.src = MONACO_BASE + "/loader.js";
+    script.onload = () => {
+      window.require.config({ paths: { vs: location.origin + MONACO_BASE } });
+      window.require(["vs/editor/editor.main"], () => resolve(window.monaco), reject);
+    };
+    script.onerror = () => reject(new Error("Monaco를 불러오지 못했습니다."));
+    document.head.appendChild(script);
+  }).catch((error) => { monacoPromise = null; throw error; });
+  return monacoPromise;
+}
+const EDITOR_LANGUAGES = {
+  yml:"yaml", yaml:"yaml", json:"json", json5:"json", mcmeta:"json", properties:"ini", ini:"ini", cfg:"ini", conf:"ini", toml:"ini",
+  js:"javascript", mjs:"javascript", ts:"typescript", sh:"shell", bash:"shell", bat:"bat", cmd:"bat", ps1:"powershell",
+  xml:"xml", html:"html", css:"css", md:"markdown", py:"python", java:"java", kt:"kotlin", lua:"lua", sql:"sql"
+};
+const editorLanguage = (path) => EDITOR_LANGUAGES[String(path).split(".").pop().toLowerCase()] || "plaintext";
+function disposeEditor() { if (activeEditor) { activeEditor.dispose(); activeEditor = null; } }
+async function mountEditor() {
+  disposeEditor();
+  const modal = state.modal;
+  if (modal?.kind !== "file-editor" || typeof document.createElement !== "function") return;
+  let monaco;
+  try { monaco = await loadMonaco(); } catch (error) { toast(error.message + " 기본 편집기를 사용합니다."); return; }
+  const host = $("#monaco-host"), area = $("#file-editor-text");
+  if (state.modal !== modal || !host || !area) return;
+  disposeEditor();
+  host.hidden = false; area.hidden = true;
+  activeEditor = monaco.editor.create(host, {
+    value: area.value, language: editorLanguage(modal.path), theme: state.theme === "dark" ? "vs-dark" : "vs",
+    automaticLayout: true, fontSize: 13, tabSize: 2, insertSpaces: true, scrollBeyondLastLine: false,
+    minimap: { enabled: true }, renderWhitespace: "selection", wordWrap: "off"
+  });
+  // Mirror into the textarea so dirty tracking and form submit keep working.
+  activeEditor.onDidChangeModelContent(() => {
+    area.value = activeEditor.getValue();
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  activeEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => $("#file-editor-form")?.requestSubmit());
+  activeEditor.focus();
+}
 function setModal(modal) {
+  disposeEditor();
   state.modal = modal;
   const host = $("#modal-root");
   if (host) host.innerHTML = modalBody();
+  if (modal?.kind === "file-editor") mountEditor();
   if (modal?.kind === "palette") {
     const input = $("#palette-search");
     input?.focus();
@@ -1340,7 +1396,8 @@ document.addEventListener("keydown",(event) => {
       return;
     }
   }
-  if (event.key==="Escape" && state.modal) {event.preventDefault();closeModal();return;}
+  // Escape inside Monaco closes its own widgets (find, suggest) first.
+  if (event.key==="Escape" && state.modal && !event.target?.closest?.(".monaco-editor")) {event.preventDefault();closeModal();return;}
   if (fileShortcut(event)) { event.preventDefault(); return; }
   if (event.target?.id==="console-command" && (event.key==="ArrowUp" || event.key==="ArrowDown")) {
     const list=state.commandHistory;

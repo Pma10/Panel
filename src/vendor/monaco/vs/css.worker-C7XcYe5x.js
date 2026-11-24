@@ -1,0 +1,1 @@
+define("vs/css.worker-C7XcYe5x", ["require", "exports"], (function(require, r){"use strict";const e=""+new URL(require.toUrl("./assets/editor.worker-Dpo8bqBT.js"),document.baseURI).href;r.__worker_url_0__=e}));
