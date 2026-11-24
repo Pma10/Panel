@@ -1,7 +1,7 @@
 
 import { DEMO_SERVERS, DEMO_LOGS, DEMO_ACTIVITY, DEMO_FILES, DEMO_BACKUPS, DEMO_SCHEDULES, DEMO_USERS, DEMO_AUDIT, ROUTE_INFO } from "./data.js";
 import { escapeHtml as h, filterLogs, serverSummary, formatMemory, validateCommand, routeFromHash, appendBoundedLog, replaceLogHistory, recentLogs } from "./utils.mjs";
-import { apiEnabled, apiRequest, streamLogs, getSession, signIn, signOut, uploadFile, fileDownloadUrl } from "./api.js";
+import { apiEnabled, apiRequest, streamLogs, getSession, signIn, signOut, setupAccount, uploadFile, fileDownloadUrl } from "./api.js";
 
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => h(value);
@@ -48,7 +48,9 @@ const state = {
   servers: structuredClone(DEMO_SERVERS), logs: replaceLogHistory(DEMO_LOGS), activity: [...DEMO_ACTIVITY],
   schedules: [...DEMO_SCHEDULES], mode: apiEnabled ? "live" : "demo",
   loading: apiEnabled, apiError: "", logError: "", logLoading: false,
-  authenticated: !apiEnabled, authLoading: apiEnabled, authError: "", username:"관리자",
+  authenticated: !apiEnabled, authLoading: apiEnabled, authError: "", username:"", setupRequired:false, users:[],
+  javaInstalls:null, javaLoading:false, fileSelection:new Set(), fileAnchor:-1, stickLogs:true,
+  commandHistory:getStore("pconn-command-history",[]), commandIndex:-1,
   query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: apiEnabled?"":"/home/minecraft/server", selectedFile: "",
   fileEntries: [], fileLoading:false, fileText:"", backups:[], backupLoading:false, viewRequest:0, viewError:"",
   network:[], startupLive:null, health:null, audit:[], diagnostics:null, viewLoading:false,
@@ -70,7 +72,8 @@ const statusText = (status) => ({
   running:"실행 중",stopped:"중지됨",starting:"시작 중",
   stopping:"종료 중",restarting:"재시작 대기",unmanaged:"기존 Java 감지"
 })[status] || "상태 알 수 없음";
-const badge = (status) => `<span class="status ${status === "running" ? "running" : status === "stopped" ? "stopped" : "warning"}"><i class="indicator"></i>${statusText(status)}</span>`;
+const TRANSITIONAL = ["starting","stopping","restarting"];
+const badge = (status) => `<span class="status ${status === "running" ? "running" : status === "stopped" ? "stopped" : "warning"} ${TRANSITIONAL.includes(status) ? "busy" : ""}"><i class="indicator"></i>${statusText(status)}</span>`;
 const fmtPlayers = (s) => s.maxPlayers ? `${s.players ?? 0} / ${s.maxPlayers}` : "—";
 const sectionNav = (section) => ROUTE_INFO.filter((item) => item.section === section).map((item) =>
   `<a href="#/${item.route}" class="nav-link ${state.route === item.route ? "active" : ""}" data-action="navigate" aria-current="${state.route === item.route ? "page" : "false"}">${icon(item.icon)}<span>${h(item.label)}</span></a>`
@@ -88,7 +91,7 @@ function renderSidebar() {
     <nav class="nav-group" style="margin-top:15px">${sectionNav("server")}</nav>
     <hr class="side-rule" /><div class="side-caption">관리</div>
     <nav class="nav-group">${sectionNav("admin")}</nav>
-    <div class="user-summary"><span class="avatar">P</span><span><strong>${state.mode==="demo"?"Pma":h(state.username)}</strong><small>${state.mode==="demo"?"소유자 · 미리보기":"관리자"}</small></span>${apiEnabled?`<button class="icon-button" data-action="logout" title="로그아웃" aria-label="로그아웃">${icon("power","small")}</button>`:""}</div>
+    <div class="user-summary"><span class="avatar">${h((state.mode==="demo"?"P":state.username||"?").slice(0,1).toUpperCase())}</span><span><strong>${state.mode==="demo"?"Pma":h(state.username)}</strong><small>${state.mode==="demo"?"소유자 · 미리보기":"로그인 계정"}</small></span>${apiEnabled?`<button class="icon-button" data-action="logout" title="로그아웃" aria-label="로그아웃">${icon("power","small")}</button>`:""}</div>
   </aside>`;
 }
 function renderChrome() {
@@ -150,15 +153,29 @@ function renderServers() {
       <tbody id="server-results">${renderServerRows(state.servers.slice(0,SERVER_PAGE_SIZE),true)}</tbody></table></div><div class="server-pagination" id="server-pagination"></div>`)}
     ${demoNote()}`;
 }
+function powerButtons(s) {
+  if (!s || s.status === "unmanaged") return "";
+  if (s.status === "stopping") return button("종료 중…","noop","","disabled");
+  if (s.status === "stopped") return button(`${icon("power","small")} 서버 시작`,"power-confirm","primary",`data-power="start"`);
+  if (s.status === "restarting") return button(`${icon("power","small")} 지금 시작`,"power-confirm","primary",`data-power="start"`)+
+    button("자동 재시작 취소","power-confirm","danger",`data-power="stop"`);
+  return `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
+    ${button(`${icon("power","small")} 서버 중지`,"power-confirm","danger",`data-power="stop"`)}`;
+}
+const statusDetail = (s) => ({
+  starting:"Java 프로세스가 실행됐고 서버 준비(Done) 메시지를 기다리는 중입니다.",
+  running:"서버가 접속을 받을 수 있는 상태입니다.",
+  stopping:"stop 명령을 보냈습니다. 월드 저장 후 종료됩니다 (최대 25초 후 강제 종료).",
+  restarting:"서버가 종료되어 잠시 후 자동으로 다시 시작합니다.",
+  stopped:"서버 프로세스가 실행 중이 아닙니다.",
+  unmanaged:"이전 패널이 실행한 Java 프로세스가 남아 있습니다."
+})[s?.status] || "";
 function renderOverview() {
   const s = server();
   if (!s) return emptyServer();
   const action = s.status==="unmanaged" ?
     '<div class="notice">이전 패널이 실행한 Java 프로세스가 남아 있습니다. PID와 서버 상태를 확인하고 기존 프로세스를 안전하게 종료한 후 패널에서 다시 시작하세요.</div>' :
-    ["stopped","restarting"].includes(s.status) ?
-      button(`${icon("power","small")} 서버 시작`,"power-confirm","primary",`data-power="start"`) :
-      `${button(`${icon("refresh","small")} 재시작`,"power-confirm","",`data-power="restart"`)}
-      ${button(`${icon("power","small")} 서버 중지`,"power-confirm","danger",`data-power="stop"`)}`;
+    powerButtons(s);
   const metrics = [
     ["접속 인원",fmtPlayers(s),"현재 플레이어"],
     ["TPS",s.tps == null ? "—" : s.tps.toFixed(1),"틱 처리율"],
@@ -172,7 +189,9 @@ function renderOverview() {
     <strong>${h(value)}</strong><p>${h(note)}</p><div class="progress-track"><div class="progress-fill ${index ? "green" : ""}" style="width:${Math.min(100,Math.max(0,percent*100))}%"></div></div></div>`).join("");
   return `${header("서버 개요","서버 상태와 자원 사용량을 확인합니다")}
     <div class="card overview-head"><div class="server-glyph">${icon("server","large")}</div><div class="overview-title">
-    <h2>${h(s.name)}</h2><p>${h(s.version)} · 가동 ${h(s.uptime)}</p></div>${badge(s.status)}<div class="page-actions">${action}</div></div>
+    <h2>${h(s.name)}</h2><p>${h(s.version)} · 가동 ${h(s.uptime)}</p><p class="status-detail">${h(statusDetail(s))}</p></div>${badge(s.status)}<div class="page-actions">${action}</div></div>
+    <div class="card info-line auto-restart-line"><div><strong>종료 시 자동 재시작</strong><p>패널에서 중지하지 않았는데 서버가 꺼지면 다시 켭니다 (10분에 최대 3회).</p></div>
+      <button class="switch ${s.autoRestart?"on":""}" role="switch" type="button" aria-checked="${Boolean(s.autoRestart)}" aria-label="종료 시 자동 재시작" data-action="auto-restart-toggle"></button></div>
     <div class="grid-stats">${metrics}</div><div class="two-col">${resources}</div>
     ${card("실행 환경",`<div class="info-list"><div class="info-line"><strong>실행 경로</strong><span class="right mono">${h(s.directory)}</span></div>
     <div class="info-line"><strong>접속 포트</strong><span class="right mono">${h(s.port)}</span></div></div>`)}
@@ -182,39 +201,44 @@ const emptyServer = () => `<div class="card empty-state">${icon("server","large"
 function renderLogRows() {
   const rows = recentLogs(state.logs,state.query,state.level);
   if (!rows.length) return `<div class="log-empty">조건에 맞는 로그가 없습니다.</div>`;
-  return rows.map((row,i) => `<div class="log-line ${/^(INFO|WARN|ERROR)$/i.test(row.level) ? row.level.toLowerCase() : "other"}" role="row">
-    <span class="mono">${String(i+1).padStart(2,"0")}</span>
+  return rows.map((row) => `<div class="log-line ${/^(INFO|WARN|ERROR)$/i.test(row.level) ? row.level.toLowerCase() : "other"}" role="row">
     <span class="log-time mono">${h(row.time)}</span>
     <span class="log-level mono">${h(row.level)}</span>
-    <span class="log-message">${h(row.message)}</span></div>`).join("");
+    <span class="log-message mono">${h(row.message)}</span></div>`).join("");
 }
+const consoleStatus = () => { const s = server(); return s ? badge(s.status) + powerButtons(s) : ""; };
 function renderConsole() {
   const s = server();
-  return `<div class="console-page">${header("콘솔",(s?.name || "서버 없음")+" · 로그 확인 및 명령어 실행")}
+  return `<div class="console-page">${header("콘솔",(s?.name || "서버 없음")+" · 로그 확인 및 명령어 실행",`<span class="console-power" id="console-status-host">${consoleStatus()}</span>`)}
     <div class="toolbar console-toolbar">
       <label class="search-field">${icon("search")}<input class="field" id="log-search" placeholder="로그 검색" aria-label="로그 검색" value="${h(state.query)}"></label>
       <div class="filter-tabs" role="group" aria-label="로그 수준">
       ${[["all","전체"],["info","정보"],["warn","경고"],["error","오류"]].map(([key,label]) =>
         `<button class="filter-tab ${state.level === key ? "active" : ""}" data-action="log-level" data-level="${key}" aria-pressed="${state.level===key}">${label}</button>`).join("")}</div>
       <div class="toolbar-spacer"></div>
-      <label class="checkbox-label"><input type="checkbox" id="log-autoscroll" ${state.autoScroll ? "checked":""}>자동 스크롤</label>
-      ${button(`${icon("download","small")} 로그 내보내기`,"download-logs","export-btn")}
+      <label class="checkbox-label"><input type="checkbox" id="log-autoscroll" ${state.autoScroll ? "checked":""}>최신 로그 따라가기</label>
+      ${state.mode==="live"?button(`${icon("folder","small")} 로그 파일`,"open-log-folder","small"):""}
+      ${button(`${icon("download","small")} 내보내기`,"download-logs","small export-btn")}
     </div>
     <section class="console-panel" aria-label="실시간 서버 로그">
       <header class="console-statusbar">
         <span class="console-status ${!s || s.status !== "running" ? "offline" : ""}"><i class="indicator"></i>${state.mode==="demo" ? "예시 로그" : state.logError ? "연결 오류" : "연결됨"}</span>
-        <span class="console-separator console-desktop"></span><span class="console-muted console-desktop">${h(s?.name || "선택된 서버 없음")}</span>
-        <span class="console-grow"></span><span class="console-muted console-desktop">실시간 출력</span>
-        <span class="console-separator console-desktop"></span><span class="console-muted mono">UTF-8</span>
-        <span class="console-muted console-desktop">최근 ${recentLogs(state.logs,state.query,state.level).length}줄</span>
+        <span class="console-grow"></span>
+        <span class="console-muted" id="log-count">${recentLogs(state.logs,state.query,state.level).length}줄 · 위로 스크롤해 이전 기록 보기</span>
       </header>
-      <div class="log-header log-grid"><span>번호</span><span>시각</span><span>수준</span><span>메시지</span></div>
       <div class="log-viewport" id="log-viewport" role="log" aria-live="off"><div class="log-rows" id="log-rows">${renderLogRows()}</div></div>
       <form class="console-composer" id="console-form"><label class="command-field"><span>›</span>
-        <input id="console-command" aria-label="서버 명령어" autocomplete="off" maxlength="512" placeholder="서버 명령어 입력" value="${h(state.command)}"></label>
+        <input id="console-command" aria-label="서버 명령어" autocomplete="off" maxlength="512" placeholder="서버 명령어 입력 (↑/↓ 이전 명령)" value="${h(state.command)}"></label>
         <button class="btn primary command-send" type="submit">전송</button></form>
     </section>
-    <p class="console-help">${state.mode === "demo" ? "예시 모드: 입력한 명령은 실제 서버에 전송되지 않습니다." : "명령어는 현재 선택된 서버에 전송됩니다. 관리 권한이 있는 계정에서만 사용하세요."}</p></div>`;
+    <p class="console-help">${state.mode === "demo" ? "예시 모드: 입력한 명령은 실제 서버에 전송되지 않습니다." : "명령어는 현재 선택된 서버에 전송됩니다. 콘솔에서 stop을 입력하면 자동 재시작 없이 종료합니다. 더 오래된 기록은 '로그 파일'의 logs 폴더에서 확인하세요."}</p></div>`;
+}
+function rememberCommand(value) {
+  const list = state.commandHistory.filter((item) => item !== value);
+  list.push(value);
+  state.commandHistory = list.slice(-50);
+  state.commandIndex = -1;
+  store("pconn-command-history", state.commandHistory);
 }
 
 function renderUnconnected(title, details) {
@@ -233,51 +257,189 @@ const fileSize = (bytes) => {
   if(bytes<1024*1024*1024)return (bytes/(1024*1024)).toFixed(1)+" MB";
   return (bytes/(1024*1024*1024)).toFixed(2)+" GB";
 };
-const relativeFile = (name) => (state.filePath?state.filePath+"/":"")+name;
-async function loadFiles(){
+const joinPath = (folder,name) => (folder?folder+"/":"")+name;
+const parentPath = (path) => path.includes("/") ? path.slice(0,path.lastIndexOf("/")) : "";
+const relativeFile = (name) => joinPath(state.filePath,name);
+const fileApi = (suffix) => "/servers/"+encodeURIComponent(state.selectedId)+"/files"+suffix;
+// Opening these as text would only show garbage; double-click downloads them instead.
+const BINARY_FILE = /\.(jar|zip|gz|tgz|tar|7z|rar|png|jpe?g|gif|webp|ico|dat|dat_old|mca|mcr|nbt|db|sqlite|class|so|dll|exe|bin)$/i;
+async function loadFiles({quiet=false}={}){
   if(state.mode!=="live" || !state.selectedId)return;
   const id=state.selectedId,folder=state.filePath,seq=++state.viewRequest;
-  state.fileLoading=true;state.viewError="";if(state.route==="files")render();
+  state.fileLoading=true;state.viewError="";
   try{
-    const result=await apiRequest("/servers/"+encodeURIComponent(id)+"/files?path="+encodeURIComponent(folder));
+    const result=await apiRequest(fileApi("?path="+encodeURIComponent(folder)));
     if(seq!==state.viewRequest || state.selectedId!==id || state.filePath!==folder)return;
     state.fileEntries=Array.isArray(result.entries)?result.entries:[];
+    const names=new Set(state.fileEntries.map(f=>f.name));
+    state.fileSelection=new Set([...state.fileSelection].filter(n=>names.has(n)));
   }catch(e){if(seq===state.viewRequest){state.viewError=e.message;state.fileEntries=[];}}
-  finally{if(seq===state.viewRequest){state.fileLoading=false;if(state.route==="files")render();}}
+  finally{
+    if(seq===state.viewRequest){
+      state.fileLoading=false;
+      const body=$("#file-tbody");
+      if(quiet && body){body.innerHTML=renderFileRows();refreshFileSelection();}
+      else if(state.route==="files")render();
+    }
+  }
+}
+function visibleFiles(){
+  const term=state.fileQuery.trim().toLocaleLowerCase("ko");
+  return state.fileEntries.filter(f=>!term||f.name.toLocaleLowerCase("ko").includes(term)).slice(0,2000);
+}
+function renderFileRows(){
+  const list=visibleFiles();
+  const up=state.filePath?'<tr class="file-row file-up" data-file-up="1" data-drop-folder="'+h(parentPath(state.filePath))+'" title="상위 폴더 (Backspace)">'+
+    '<td class="file-check"></td><td colspan="4"><span class="file-name">'+icon("folder")+'<span>..</span></span></td></tr>':'';
+  if(!list.length)return up+'<tr><td colspan="5" class="file-empty">'+
+    (state.fileLoading?"불러오는 중…":state.fileQuery?"검색 결과가 없습니다.":"비어 있는 폴더입니다. 파일이나 폴더를 여기로 끌어다 놓으면 업로드됩니다.")+'</td></tr>';
+  return up+list.map((f)=>{
+    const folder=f.type==="folder",sel=state.fileSelection.has(f.name),name=h(f.name);
+    return '<tr class="file-row'+(sel?' active':'')+'" draggable="true" data-file="'+name+'"'+(folder?' data-drop-folder="'+h(relativeFile(f.name))+'"':'')+'>'+
+      '<td class="file-check"><input type="checkbox" data-file-check="'+name+'" '+(sel?'checked':'')+' aria-label="'+name+' 선택"></td>'+
+      '<td><span class="file-name">'+icon(folder?"folder":"file")+'<span>'+name+'</span></span></td>'+
+      '<td class="numeric">'+(folder?"—":fileSize(f.size))+'</td>'+
+      '<td class="numeric">'+h(new Date(f.modified).toLocaleString("ko-KR",{dateStyle:"short",timeStyle:"short"}))+'</td>'+
+      '<td class="file-row-actions">'+
+        (folder?'':'<button class="mini-btn" data-action="file-edit" data-name="'+name+'">편집</button>'+
+          '<button class="mini-btn" data-action="file-download" data-name="'+name+'">받기</button>')+
+        '<button class="mini-btn" data-action="file-rename" data-name="'+name+'">이름</button>'+
+        '<button class="mini-btn danger" data-action="file-delete" data-name="'+name+'">삭제</button></td></tr>';
+  }).join("");
+}
+function renderFileSelectionBar(){
+  const n=state.fileSelection.size;
+  if(!n)return '<span class="hint">'+state.fileEntries.length+'개 항목</span>';
+  return '<strong>'+n+'개 선택</strong>'+button("다운로드","file-download-selected","small")+
+    button("삭제","file-delete-selected","small danger")+button("선택 해제","file-clear-selection","small");
+}
+// Selection changes only toggle classes so an in-progress drag is not torn down.
+function refreshFileSelection(){
+  document.querySelectorAll("[data-file]").forEach((row)=>{
+    const on=state.fileSelection.has(row.dataset.file);
+    row.classList.toggle("active",on);
+    const box=row.querySelector("[data-file-check]");if(box)box.checked=on;
+  });
+  const bar=$("#file-selbar");if(bar)bar.innerHTML=renderFileSelectionBar();
+  const all=$("#file-check-all");
+  if(all){const list=visibleFiles();all.checked=list.length>0&&list.every(f=>state.fileSelection.has(f.name));}
+}
+function selectFile(name,event){
+  const list=visibleFiles(),index=list.findIndex(f=>f.name===name);
+  const additive=event?.ctrlKey||event?.metaKey;
+  if(event?.shiftKey && state.fileAnchor>=0){
+    if(!additive)state.fileSelection.clear();
+    const [a,b]=[Math.min(state.fileAnchor,index),Math.max(state.fileAnchor,index)];
+    list.slice(a,b+1).forEach(f=>state.fileSelection.add(f.name));
+  }else if(additive){
+    if(state.fileSelection.has(name))state.fileSelection.delete(name);else state.fileSelection.add(name);
+    state.fileAnchor=index;
+  }else{state.fileSelection=new Set([name]);state.fileAnchor=index;}
+  refreshFileSelection();
+}
+async function openFolder(path){
+  state.filePath=path;state.fileSelection=new Set();state.fileAnchor=-1;state.fileQuery="";
+  await loadFiles();
+}
+async function openFileEntry(name){
+  const entry=state.fileEntries.find(f=>f.name===name);if(!entry)return;
+  if(entry.type==="folder")return openFolder(relativeFile(name));
+  if(BINARY_FILE.test(name))return downloadEntry(name);
+  await openTextFile(name);
+}
+function downloadEntry(name){
+  const a=document.createElement("a");
+  a.href=fileDownloadUrl(state.selectedId,relativeFile(name));
+  a.download=name;document.body.appendChild(a);a.click();a.remove();
+}
+function confirmDelete(names){
+  if(!names.length)return;
+  const folders=names.filter(n=>state.fileEntries.find(f=>f.name===n)?.type==="folder").length;
+  setModal({kind:"confirm",title:names.length===1?"'"+names[0]+"'을(를) 삭제할까요?":names.length+"개 항목을 삭제할까요?",
+    description:(folders?"폴더는 안의 모든 내용과 함께 삭제됩니다. ":"")+"삭제한 파일은 복구할 수 없습니다."+
+      (names.length>1?" 대상: "+names.slice(0,8).join(", ")+(names.length>8?" 외 "+(names.length-8)+"개":""):""),
+    paths:names.map(relativeFile),confirmLabel:"삭제",confirmAction:"file-delete-run",danger:true});
+}
+async function movePaths(names,dest){
+  let moved=0;
+  for(const name of names){
+    const from=relativeFile(name),to=joinPath(dest,name);
+    if(from===to||dest===from||dest.startsWith(from+"/"))continue;
+    await apiRequest(fileApi("/rename"),{method:"PATCH",body:{from,to}});moved++;
+  }
+  return moved;
+}
+// items: [{path, file}] or [{path, dir:true}], paths relative to dest.
+async function uploadItems(items,dest){
+  const files=items.filter(i=>i.file);
+  if(!items.length)return;
+  if(dest===state.filePath){
+    const existing=new Set(state.fileEntries.map(f=>f.name));
+    const conflicts=files.filter(i=>!i.path.includes("/")&&existing.has(i.path)).map(i=>i.path);
+    if(conflicts.length&&!confirm(conflicts.length+"개 파일을 덮어씁니다. 계속할까요?\n"+conflicts.slice(0,8).join("\n")))return;
+  }
+  const dirs=new Set();
+  for(const item of items){
+    const parts=item.path.split("/");
+    for(let k=1;k<parts.length;k++)dirs.add(parts.slice(0,k).join("/"));
+    if(item.dir)dirs.add(item.path);
+  }
+  for(const dir of [...dirs].sort((a,b)=>a.split("/").length-b.split("/").length)){
+    try{await apiRequest(fileApi("/mkdir"),{method:"POST",body:{path:joinPath(dest,dir)}});}
+    catch(e){if(e.status!==409)throw e;}
+  }
+  let done=0;
+  for(const item of files){
+    toast("업로드 중 "+(++done)+"/"+files.length+" · "+item.path);
+    await uploadFile(state.selectedId,joinPath(dest,item.path),item.file);
+  }
+  toast(files.length+"개 파일 업로드 완료");
+}
+async function collectDropped(transfer){
+  // webkitGetAsEntry must be read synchronously, before the first await.
+  const entries=[...(transfer.items||[])].map(it=>it.webkitGetAsEntry?.()).filter(Boolean);
+  if(!entries.length)return [...(transfer.files||[])].map(file=>({file,path:file.name}));
+  const out=[];
+  const walk=async(entry,prefix)=>{
+    if(entry.isFile){out.push({path:prefix+entry.name,file:await new Promise((ok,fail)=>entry.file(ok,fail))});return;}
+    if(!entry.isDirectory)return;
+    out.push({path:prefix+entry.name,dir:true});
+    const reader=entry.createReader();
+    for(;;){
+      const batch=await new Promise((ok,fail)=>reader.readEntries(ok,fail));
+      if(!batch.length)break;
+      for(const child of batch)await walk(child,prefix+entry.name+"/");
+    }
+  };
+  for(const entry of entries)await walk(entry,"");
+  return out;
 }
 function renderLiveFiles(){
-  const entries=state.fileEntries.slice(0,250);
-  const active=state.fileEntries.find(f=>f.name===state.selectedFile);
-  const running=server()?.status!=="stopped";
-  const bar='<div class="toolbar"><div class="crumb-path"><button data-action="file-root">서버 루트</button>'+
-    (state.filePath?' / '+h(state.filePath):'')+'</div><div class="toolbar-spacer"></div>'+
-    button("새 폴더","file-new-folder","",running?'disabled':'')+
-    button(icon("upload","small")+" 파일 업로드","file-upload","primary",running?'disabled':'')+
-    '<input id="file-upload-input" type="file" hidden></div>';
-  const rows=entries.map(f=>'<tr class="file-row '+(state.selectedFile===f.name?'active':'')+'" data-action="file-select" data-name="'+h(f.name)+'">'+
-    '<td><span class="file-name">'+icon(f.type==="folder"?"folder":"file")+'<span>'+h(f.name)+'</span></span></td>'+
-    '<td>'+h(f.type==="folder"?"폴더":"파일")+'</td><td class="numeric">'+fileSize(f.size)+'</td>'+
-    '<td class="numeric">'+h(new Date(f.modified).toLocaleDateString("ko-KR"))+'</td></tr>').join("");
-  const nameAttr = active?'data-name="'+h(active.name)+'"':'';
-  const inspector=active?'<dl><dt>유형</dt><dd>'+h(active.type==="folder"?"폴더":"파일")+'</dd><dt>크기</dt><dd>'+fileSize(active.size)+'</dd>'+
-    '<dt>수정</dt><dd>'+h(new Date(active.modified).toLocaleString("ko-KR"))+'</dd></dl><div class="file-actions">'+
-    button(active.type==="folder"?"폴더 열기":"미리보기",active.type==="folder"?"file-open":"file-preview","",nameAttr)+
-    (active.type==="file"?button("다운로드","file-download","",nameAttr):"")+
-    button("이름 변경","file-rename","",nameAttr+(running?' disabled':''))+
-    button("삭제","file-delete","danger",nameAttr+(running?' disabled':''))+
-    '</div>':'<p class="hint">항목을 선택하면 파일 작업이 표시됩니다.</p>';
   if(!server())return header("파일","실제 서버 파일 시스템")+
     '<div class="card empty-state"><strong>먼저 서버를 생성하세요.</strong><p>서버 생성 후 JAR 파일을 업로드할 수 있습니다.</p><a class="btn" href="#/servers">서버 목록</a></div>';
-  return header("파일","실제 서버 파일 시스템 · 서버 폴더 내부만 접근할 수 있습니다")+
-    bar+
-    (running?'<div class="notice">파일 수정 및 업로드는 서버를 중지한 상태에서만 가능합니다.</div>':'')+
+  const segments=state.filePath?state.filePath.split("/"):[];
+  const crumbs='<button class="crumb" data-action="file-goto" data-path="" data-drop-folder="">'+icon("folder","small")+' 서버 루트</button>'+
+    segments.map((seg,i)=>{const path=h(segments.slice(0,i+1).join("/"));
+      return '<span class="crumb-sep">/</span><button class="crumb" data-action="file-goto" data-path="'+path+'" data-drop-folder="'+path+'">'+h(seg)+'</button>';}).join("");
+  const list=visibleFiles();
+  const allChecked=list.length>0&&list.every(f=>state.fileSelection.has(f.name));
+  return header("파일","서버 폴더 내부 · 서버가 실행 중이어도 편집·업로드할 수 있습니다")+
+    '<div class="toolbar file-toolbar"><div class="crumb-path">'+crumbs+'</div><div class="toolbar-spacer"></div>'+
+      '<label class="search-field file-search">'+icon("search")+'<input class="field" id="file-search" placeholder="이 폴더에서 찾기" autocomplete="off" value="'+h(state.fileQuery)+'" aria-label="파일 찾기"></label>'+
+      button("새 파일","file-new-file","small")+button("새 폴더","file-new-folder","small")+
+      button(icon("refresh","small"),"file-refresh","small",'title="새로고침" aria-label="새로고침"')+
+      button("폴더 업로드","folder-upload","small")+
+      button(icon("upload","small")+" 파일 업로드","file-upload","small primary")+
+      '<input id="file-upload-input" type="file" multiple hidden><input id="folder-upload-input" type="file" webkitdirectory multiple hidden></div>'+
     (state.viewError?'<div class="notice">'+h(state.viewError)+'</div>':'')+
-    (state.fileLoading?'<div class="card empty-state"><strong>파일 목록을 불러오는 중입니다</strong></div>':
-     '<div class="file-layout">'+card("파일 목록",'<div class="table-scroll"><table class="data-table"><thead><tr><th>이름</th><th>유형</th><th class="numeric">크기</th><th class="numeric">수정</th></tr></thead><tbody>'+
-        (rows||'<tr><td colspan="4" class="empty-state">이 폴더는 비어 있습니다.</td></tr>')+
-        '</tbody></table></div>')+
-     '<aside class="card file-inspector"><h3>'+h(active?.name||"선택한 파일")+'</h3>'+inspector+'</aside></div>')+
-     (state.fileEntries.length>250?'<p class="hint">처음 250개 항목만 표시합니다. 항목이 많은 폴더는 서버에서 별도 정리가 필요합니다.</p>':'');
+    '<section class="card file-card" id="file-dropzone"><div class="file-selbar" id="file-selbar">'+renderFileSelectionBar()+'</div>'+
+      '<div class="table-scroll"><table class="data-table file-table"><thead><tr>'+
+      '<th class="file-check"><input type="checkbox" id="file-check-all" aria-label="전체 선택" '+(allChecked?'checked':'')+'></th>'+
+      '<th>이름</th><th class="numeric">크기</th><th class="numeric">수정</th><th></th></tr></thead>'+
+      '<tbody id="file-tbody">'+renderFileRows()+'</tbody></table></div>'+
+      '<div class="drop-hint">놓으면 이 폴더에 업로드합니다</div></section>'+
+    (state.fileEntries.length>2000?'<p class="hint">처음 2000개 항목만 표시합니다. 찾기로 범위를 좁히세요.</p>':'')+
+    '<p class="hint">더블클릭으로 열기·편집 · Enter 열기 · F2 이름 변경 · Delete 삭제 · Backspace 상위 폴더 · Ctrl/Shift+클릭 다중 선택 · Ctrl+A 전체 선택 · 항목을 폴더나 경로로 끌어 이동 · 바탕화면에서 파일·폴더를 끌어와 업로드</p>';
 }
 
 function renderFiles() {
@@ -303,19 +465,20 @@ function renderFiles() {
 
 async function refreshRouteData(){
   if(state.mode!=="live" || !state.authenticated)return;
-  if(!state.selectedId && !["audit","settings"].includes(state.route))return;
+  if(!state.selectedId && !["audit","settings","users"].includes(state.route))return;
   if(state.route==="files"){await loadFiles();return;}
   const route=state.route;
-  const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit",settings:"diagnostics"};
+  const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit",settings:"diagnostics",users:"users"};
   if(!endpoints[route])return;
   const id=state.selectedId,seq=++state.viewRequest;
   state.viewError="";state.viewLoading=true;render();
   try{
-    const path=route==="audit"?"/audit":route==="settings"?"/diagnostics":"/servers/"+encodeURIComponent(id)+"/"+endpoints[route];
+    const path=route==="audit"?"/audit":route==="settings"?"/diagnostics":route==="users"?"/users":"/servers/"+encodeURIComponent(id)+"/"+endpoints[route];
     const response=await apiRequest(path);
     if(seq!==state.viewRequest || id!==state.selectedId || route!==state.route)return;
     if(route==="backups")state.backups=Array.isArray(response.backups)?response.backups:[];
-    if(route==="startup")state.startupLive=response;
+    if(route==="startup"){state.startupLive=response;if(state.javaInstalls===null)detectJavaInstalls();}
+    if(route==="users")state.users=Array.isArray(response.users)?response.users:[];
     if(route==="network")state.network=Array.isArray(response.ports)?response.ports:[];
     if(route==="schedules")state.schedules=Array.isArray(response.schedules)?response.schedules:[];
     if(route==="health")state.health=response;
@@ -365,20 +528,73 @@ function renderJarUpgrade(st){
       '</span>'+button("이전 JAR로 롤백","jar-rollback","danger",disabled)+'</div>':"")+
     '<p class="hint">Java 프로세스를 자동으로 재시작하지 않습니다. 월드 호환성을 확인하고 중요한 데이터는 별도 백업하세요.</p>');
 }
+// Mirrors defaultStartCommand and splitCommand in go_java.go.
+const DEFAULT_START_COMMAND = "{java} -Xms512M -Xmx{memory}M -jar {jar} nogui";
+function previewCommand(values){
+  const template=String(values.command||"").trim()||DEFAULT_START_COMMAND;
+  const java=values.java||"java";
+  const fill={"{java}":java,"{memory}":String(values.memory||""),"{jar}":values.jar||"server.jar","{port}":String(values.port||"")};
+  const args=[];let current="",quoted=false,inArg=false;
+  for(const ch of template){
+    if(ch==='"'){quoted=!quoted;inArg=true;}
+    else if(!quoted&&(ch===" "||ch==="\t")){if(inArg){args.push(current);current="";inArg=false;}}
+    else{current+=ch;inArg=true;}
+  }
+  if(inArg)args.push(current);
+  return args.map(arg=>arg.replace(/\{java\}|\{memory\}|\{jar\}|\{port\}/g,(k)=>fill[k]))
+    .map(arg=>/\s/.test(arg)?'"'+arg+'"':arg).join(" ");
+}
+function startupFormValues(){
+  const st=state.startupLive||{};
+  return {java:$("#live-java")?.value??st.javaBin,command:$("#live-command")?.value??st.startCommand,
+    memory:$("#live-memory")?.value??st.memoryMb,jar:$("#live-jar")?.value??st.jar,port:st.port};
+}
+async function detectJavaInstalls(){
+  if(state.mode!=="live"||state.javaLoading)return;
+  state.javaLoading=true;
+  const list=$("#java-list");if(list)list.innerHTML='<p class="hint">설치된 Java를 찾는 중입니다…</p>';
+  try{
+    const result=await apiRequest("/java",{timeoutMs:30000});
+    state.javaInstalls=Array.isArray(result.installations)?result.installations:[];
+  }catch(e){state.javaInstalls=[];toast(e.message);}
+  finally{
+    state.javaLoading=false;
+    const host=$("#java-list");if(host)host.innerHTML=renderJavaList();
+  }
+}
+function renderJavaList(){
+  const list=state.javaInstalls;
+  if(list===null||state.javaLoading)return '<p class="hint">설치된 Java를 찾는 중입니다…</p>';
+  if(!list.length)return '<p class="hint">설치된 Java를 찾지 못했습니다. 실행 파일 경로를 직접 입력하세요.</p>';
+  const current=$("#live-java")?.value??state.startupLive?.javaBin??"";
+  return list.map(j=>'<button type="button" class="java-option '+(current===j.path?'active':'')+'" data-action="java-pick" data-path="'+h(j.path)+'">'+
+    '<strong>Java '+h(j.version||"?")+'</strong><span class="mono">'+h(j.path)+'</span><small>'+h(j.source)+'</small></button>').join("");
+}
 function renderLiveStartup(){
   const st=state.startupLive;
-  return header("시작 설정","Java 실행 메모리, 서버 JAR, EULA 동의 설정")+liveViewStatus()+
-    (!st?'<div class="card empty-state">서버 설정을 불러올 수 없습니다.</div>':
-      '<form id="startup-form" class="stack">'+
-      '<section class="card settings-card"><h2>실제 서버 설정</h2><div class="field-grid">'+
+  if(!st)return header("시작 설정","Java, 실행 명령어, 메모리, 자동 재시작")+liveViewStatus()+'<div class="card empty-state">서버 설정을 불러올 수 없습니다.</div>';
+  return header("시작 설정","Java, 실행 명령어, 메모리, 자동 재시작 · 변경 사항은 다음 시작부터 적용됩니다")+liveViewStatus()+
+    '<form id="startup-form" class="stack">'+
+    '<section class="card settings-card"><h2>기본</h2><div class="field-grid">'+
       inputRow("live-name","서버 이름",st.name)+
-      inputRow("live-memory","최대 메모리 (MiB)",st.memoryMb,"number")+
-      inputRow("live-jar","실행 JAR 이름",st.jar)+
-      '<div class="form-group"><label for="live-port">접속 포트</label><input id="live-port" class="field" type="number" value="'+h(st.port)+'" readonly></div>'+
-      '</div><label class="checkbox-label" style="margin-top:20px"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
-      '<label class="checkbox-label" style="margin-top:12px"><input name="live-auto-restart" type="checkbox" '+(st.autoRestart?'checked':'')+'> 비정상 종료 시 자동 재시작 (최대 3회/10분)</label>'+
-      '<p class="hint">선택된 JAR 파일은 서버 루트 폴더에 업로드되어 있어야 합니다. 설정 변경은 서버가 중지된 상태에서만 가능합니다.</p></section>'+
-      '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>')+
+      inputRow("live-memory","최대 메모리 (MiB) · {memory}",st.memoryMb,"number")+
+      inputRow("live-jar","서버 JAR 이름 · {jar}",st.jar)+
+      '<div class="form-group"><label for="live-port">접속 포트 · {port}</label><input id="live-port" class="field" type="number" value="'+h(st.port)+'" readonly></div>'+
+    '</div></section>'+
+    '<section class="card settings-card"><div class="card-title"><h2>Java 런타임 · {java}</h2>'+button("다시 찾기","java-detect","small")+'</div>'+
+      '<div class="form-group"><label for="live-java">Java 실행 파일 경로</label>'+
+      '<input class="field mono" id="live-java" name="live-java" value="'+h(st.javaBin||"")+'" placeholder="비워 두면 패널 기본값 (PANEL_JAVA_BIN, 기본 java)" autocomplete="off"></div>'+
+      '<div class="java-list" id="java-list">'+renderJavaList()+'</div></section>'+
+    '<section class="card settings-card"><div class="card-title"><h2>실행 명령어</h2>'+button("기본값으로","startup-command-reset","small")+'</div>'+
+      '<div class="form-group"><label for="live-command">명령어 (비워 두면 기본값)</label>'+
+      '<input class="field mono" id="live-command" name="live-command" value="'+h(st.startCommand||"")+'" placeholder="'+h(DEFAULT_START_COMMAND)+'" autocomplete="off" spellcheck="false"></div>'+
+      '<p class="hint">{java} {memory} {jar} {port} 값이 자동으로 채워집니다. 공백이 들어간 인자는 "큰따옴표"로 감싸세요. 셸을 거치지 않으므로 &amp;&amp;, | 같은 셸 문법은 쓸 수 없습니다 (필요하면 bash start.sh 처럼 스크립트를 실행하세요).</p>'+
+      '<div class="form-group"><label>실제 실행될 명령</label><div class="command-preview mono" id="command-preview">'+h(previewCommand(startupFormValues()))+'</div></div></section>'+
+    '<section class="card settings-card"><h2>동작</h2>'+
+      '<label class="checkbox-label"><input name="live-eula" type="checkbox" '+(st.eulaAccepted?'checked':'')+'> Minecraft EULA 동의</label>'+
+      '<label class="checkbox-label" style="margin-top:12px"><input name="live-auto-restart" type="checkbox" '+(st.autoRestart?'checked':'')+'> 서버가 종료되면 자동으로 다시 시작</label>'+
+      '<p class="hint">패널의 중지 버튼이나 콘솔의 stop 명령으로 멈춘 경우는 다시 시작하지 않습니다. 10분 안에 3번 연속 종료되면 자동 재시작을 멈춥니다.</p></section>'+
+    '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>'+
     renderJarUpgrade(st);
 }
 function renderLiveNetwork(){
@@ -418,12 +634,30 @@ function renderLiveHealth(){
       '</div>'))+
     '<p class="hint">TPS, MSPT, 플레이어 수는 서버용 데이터 수집 플러그인 또는 별도 API가 연결되어야 실제 측정할 수 있습니다.</p>';
 }
+function passwordRow(name,label,autocomplete="new-password"){
+  return '<div class="form-group"><label for="'+h(name)+'">'+h(label)+'</label>'+
+    '<input class="field" id="'+h(name)+'" name="'+h(name)+'" type="password" maxlength="4096" autocomplete="'+autocomplete+'" required></div>';
+}
 function renderLiveUsers(){
-  return header("사용자","현재 버전은 단일 관리자 로그인만 지원합니다")+
-  card("관리자",'<div class="info-list"><div class="info-line"><div><strong>관리자</strong>'+
-    '<p>세션 인증·CSRF 보호·로그인 시도 제한을 적용합니다.</p></div>'+
-    button("로그아웃","logout")+'</div></div>')+
-  '<p class="hint">다중 사용자 계정, 역할별 권한 제어는 아직 구현되지 않았습니다.</p>';
+  const list=state.users||[];
+  return header("계정","패널에 로그인할 수 있는 계정을 관리합니다")+liveViewStatus()+
+    '<div class="two-col users-layout">'+
+    card("계정 목록",'<div class="info-list">'+(list.map(u=>
+      '<div class="info-line"><div><strong>'+h(u.username)+(u.username===state.username?' <span class="status running">현재 계정</span>':'')+'</strong>'+
+      '<p>생성 '+h(u.created?new Date(u.created).toLocaleString("ko-KR"):"—")+'</p></div>'+
+      (u.username===state.username?'':button("삭제","user-delete","small danger",'data-name="'+h(u.username)+'"'))+'</div>').join("")||
+      '<div class="empty-state">계정 목록을 불러오는 중입니다.</div>')+'</div>')+
+    '<div class="stack">'+
+      '<form class="card settings-card" id="user-create-form"><h2>새 계정</h2><div class="stack">'+
+        '<div class="form-group"><label for="new-username">아이디 (영문·숫자·_ - . 3~32자)</label><input class="field" id="new-username" name="new-username" minlength="3" maxlength="32" autocomplete="off" required></div>'+
+        passwordRow("new-user-password","비밀번호 (12자 이상)")+
+        '<button class="btn primary" type="submit">계정 만들기</button></div></form>'+
+      '<form class="card settings-card" id="password-form"><h2>내 비밀번호 변경</h2><div class="stack">'+
+        passwordRow("current-password","현재 비밀번호","current-password")+
+        passwordRow("next-password","새 비밀번호 (12자 이상)")+
+        '<button class="btn" type="submit">비밀번호 변경</button></div></form>'+
+    '</div></div>'+
+    '<p class="hint">모든 계정은 같은 관리 권한을 가집니다. 계정을 삭제하면 그 계정의 로그인 세션도 즉시 끊어집니다.</p>';
 }
 function renderLiveAudit(){
   const entries=state.audit||[];
@@ -538,8 +772,8 @@ function renderSettings() {
     card("화면 설정",'<div class="info-list"><div class="info-line"><div><strong>어두운 테마</strong>'+
       '<p>브라우저에만 저장되는 화면 설정입니다.</p></div>'+
       '<button class="switch '+(state.theme==="dark"?"on":"")+'" role="switch" type="button" aria-checked="'+(state.theme==="dark")+'" aria-label="다크 모드" data-action="theme-toggle"></button></div></div>')+
-    card("관리자 보안",'<div class="info-list"><div class="info-line"><div><strong>단일 관리자 세션</strong>'+
-      '<p>세션 만료 시간은 8시간입니다. 관리자 비밀번호는 서버 환경 변수에서만 변경할 수 있습니다.</p></div>'+
+    card("계정 보안",'<div class="info-list"><div class="info-line"><div><strong>'+h(state.username)+' 계정으로 로그인됨</strong>'+
+      '<p>세션 만료 시간은 8시간입니다. 계정 추가·삭제와 비밀번호 변경은 계정 메뉴에서 할 수 있습니다.</p></div>'+
       button("로그아웃","logout")+'</div></div>')+
     (state.diagnostics?card("Go 패널 메모리·성능 진단",
       '<div class="info-list">'+
@@ -639,16 +873,21 @@ function modalBody() {
         <button class="btn primary" type="submit">서버 추가</button></div>
     </form></div>`;
   if (m.kind==="file-editor") return '<div class="modal-scrim" data-action="modal-background"><form class="modal file-edit-dialog" id="file-editor-form" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
-    '<h2 id="modal-title">파일 편집 · '+h(m.path)+'</h2><p>UTF-8 텍스트 파일 (최대 1MiB) · 서버 중지 시에만 저장</p>'+
-    '<textarea class="file-editor" name="content" spellcheck="false" '+(server()?.status!=="stopped"?'readonly':'')+'>'+h(m.content)+'</textarea>'+
-    '<div class="modal-actions" style="margin-top:17px"><button type="button" class="btn" data-action="modal-close">닫기</button>'+
-    '<button class="btn primary" type="submit" '+(server()?.status!=="stopped"?'disabled':'')+'>저장</button></div></form></div>';
-  if (m.kind==="file-mkdir" || m.kind==="file-rename") return '<div class="modal-scrim" data-action="modal-background">'+
-    '<form class="modal" id="'+(m.kind==="file-mkdir"?'folder-create-form':'file-rename-form')+'" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
-    '<h2 id="modal-title">'+(m.kind==="file-mkdir"?'새 폴더':'이름 변경')+'</h2><p>현재 서버 폴더 안에서만 생성 및 변경할 수 있습니다.</p>'+
-    '<div class="form-group"><label for="file-new-name">이름</label><input id="file-new-name" name="name" class="field" maxlength="100" required value="'+h(m.name||"")+'"></div>'+
+    '<div class="editor-head"><h2 id="modal-title" class="mono">'+h(m.path)+'</h2><span class="editor-state '+(m.dirty?'dirty':'')+'" id="editor-state">'+(m.dirty?"수정됨":"저장됨")+'</span></div>'+
+    '<textarea class="file-editor" id="file-editor-text" name="content" spellcheck="false" wrap="off">'+h(m.content)+'</textarea>'+
+    '<div class="modal-actions"><span class="hint">Ctrl+S 저장 · Tab 들여쓰기 · UTF-8 텍스트 (최대 1MiB) · 실행 중에도 저장할 수 있습니다</span><span class="toolbar-spacer"></span>'+
+    '<button type="button" class="btn" data-action="modal-close">닫기</button>'+
+    '<button class="btn primary" type="submit">저장</button></div></form></div>';
+  if (m.kind==="file-mkdir" || m.kind==="file-rename" || m.kind==="file-new") {
+    const formId={"file-mkdir":"folder-create-form","file-rename":"file-rename-form","file-new":"file-create-form"}[m.kind];
+    const title={"file-mkdir":"새 폴더","file-rename":"이름 변경","file-new":"새 파일"}[m.kind];
+    return '<div class="modal-scrim" data-action="modal-background">'+
+    '<form class="modal" id="'+formId+'" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
+    '<h2 id="modal-title">'+title+'</h2><p>'+h(state.filePath?"/"+state.filePath:"서버 루트")+' 폴더 안에 '+(m.kind==="file-rename"?"이름을 바꿉니다.":"만듭니다.")+'</p>'+
+    '<div class="form-group"><label for="file-new-name">이름</label><input id="file-new-name" name="name" class="field" maxlength="100" required value="'+h(m.name||"")+'" autocomplete="off"></div>'+
     '<div class="modal-actions" style="margin-top:22px"><button type="button" class="btn" data-action="modal-close">취소</button>'+
     '<button type="submit" class="btn primary">확인</button></div></form></div>';
+  }
   return `<div class="modal-scrim" data-action="modal-background"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <h2 id="modal-title">${h(m.title || "확인")}</h2><p>${h(m.description || "")}</p>
     ${state.mode==="demo" ? `<div class="demo-block" style="margin-bottom:20px">예시 모드입니다. 실제 서버나 파일은 변경되지 않습니다.</div>` : ""}
@@ -663,14 +902,22 @@ function paletteItems() {
     ${icon(item.icon)}<span>${h(item.label)}</span>${icon("arrow","small")}</button>`).join("");
 }
 function renderLogin() {
+  const setup = state.setupRequired;
   return '<main class="login-screen"><div class="login-brand"><strong>Panel</strong><small>마인크래프트 서버 관리</small></div>' +
-    '<form class="login-card" id="login-form" autocomplete="on">' +
-      '<h1>관리자 로그인</h1><p>관리 패널에 접근하려면 비밀번호를 입력하세요.</p>' +
-      '<div class="form-group"><label for="admin-password">관리자 비밀번호</label>' +
-        '<input class="field" id="admin-password" name="password" type="password" minlength="12" maxlength="4096" autocomplete="current-password" required autofocus></div>' +
+    '<form class="login-card" id="'+(setup?'setup-form':'login-form')+'" autocomplete="on">' +
+      (setup?'<h1>첫 계정 만들기</h1><p>아직 계정이 없습니다. 이 패널을 관리할 계정을 만드세요.</p>':
+        '<h1>로그인</h1><p>패널 계정으로 로그인하세요.</p>') +
+      '<div class="form-group"><label for="login-username">아이디</label>' +
+        '<input class="field" id="login-username" name="username" minlength="3" maxlength="32" autocomplete="username" required autofocus></div>' +
+      '<div class="form-group"><label for="login-password">비밀번호'+(setup?' (12자 이상)':'')+'</label>' +
+        '<input class="field" id="login-password" name="password" type="password" maxlength="4096" '+(setup?'minlength="12" autocomplete="new-password"':'autocomplete="current-password"')+' required></div>' +
+      (setup?'<div class="form-group"><label for="login-password2">비밀번호 확인</label>' +
+        '<input class="field" id="login-password2" name="password2" type="password" minlength="12" maxlength="4096" autocomplete="new-password" required></div>':'') +
       (state.authError?'<div class="login-error" role="alert">'+h(state.authError)+'</div>':'') +
-      '<button type="submit" class="btn primary login-submit">로그인</button>' +
-      '<small class="login-footnote">관리 서버에서 지정한 비밀번호를 사용합니다. 이 연결은 '+(location.protocol==="https:"?"HTTPS":"로컬 접속")+'입니다.</small>' +
+      '<button type="submit" class="btn primary login-submit">'+(setup?'계정 만들고 시작하기':'로그인')+'</button>' +
+      '<small class="login-footnote">'+(setup?'첫 계정은 이 화면에서 한 번만 만들 수 있습니다. 이후 계정은 로그인 후 계정 메뉴에서 추가합니다.':
+        'PANEL_ADMIN_PASSWORD로 운영하던 패널은 아이디 admin과 그 비밀번호로 로그인합니다.')+
+      ' 이 연결은 '+(location.protocol==="https:"?"HTTPS":"로컬 접속")+'입니다.</small>' +
     '</form></main>';
 }
 async function bootstrapAuth() {
@@ -678,11 +925,14 @@ async function bootstrapAuth() {
   try {
     const session=await getSession();
     state.authenticated=Boolean(session?.authenticated);
-    state.username=session?.username || "관리자";
+    state.username=session?.username || "";
     state.authError="";
   } catch(e) {
     state.authenticated=false;
     if(e?.status!==401) state.authError="인증 서버에 연결할 수 없습니다: "+e.message;
+    else {
+      try{state.setupRequired=Boolean((await apiRequest("/auth/setup"))?.required);}catch{state.setupRequired=false;}
+    }
   } finally {
     state.authLoading=false;
     render();
@@ -710,7 +960,7 @@ function render() {
     <main class="page ${state.route==="console"?"console-page":""}" id="main-content">${content}
       ${state.route!=="console"?`<div class="footer">Panel · ${state.mode==="demo"?"프런트엔드 시연":"서버 관리"} · <a href="https://github.com/Pma10/Panel" target="_blank" rel="noopener noreferrer">GitHub</a></div>`:""}
     </main></div></div><div id="modal-root">${modalBody()}</div><div id="toast-root" aria-live="polite"></div>`;
-  if (state.route === "console") scrollLogs();
+  if (state.route === "console") scrollLogs(state.autoScroll);
   if (state.route === "servers") filterServerRows();
 }
 function setModal(modal) {
@@ -721,6 +971,8 @@ function setModal(modal) {
     const input = $("#palette-search");
     input?.focus();
   } else if (modal?.kind === "create") $("#new-server-name")?.focus();
+  else if (["file-rename","file-new","file-mkdir"].includes(modal?.kind)) $("#file-new-name")?.focus();
+  else if (modal?.kind === "file-editor") $("#file-editor-text")?.focus();
   else if (modal) $("#modal-root .btn")?.focus();
 }
 function toast(message) {
@@ -730,8 +982,10 @@ function toast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { if (host.isConnected) host.innerHTML = ""; }, 3500);
 }
-function scrollLogs() {
-  if (!state.autoScroll) return;
+// Follow new output only while the reader is at the bottom, so scrolling up
+// to read older lines is not yanked back down by the next log line.
+function scrollLogs(force = false) {
+  if (!force && !(state.autoScroll && state.stickLogs)) return;
   requestAnimationFrame(() => {
     const pane = $("#log-viewport");
     if (pane) pane.scrollTop = pane.scrollHeight;
@@ -741,10 +995,8 @@ function updateLogRows() {
   const parent = $("#log-rows");
   if (!parent || state.route !== "console" || document.hidden) return;
   parent.innerHTML = renderLogRows();
-  const count = $(".console-statusbar .console-muted:last-child");
-  if (count && count.textContent.endsWith("줄")) {
-    count.textContent = "최근 " + recentLogs(state.logs,state.query,state.level).length + "줄";
-  }
+  const count = $("#log-count");
+  if (count) count.textContent = recentLogs(state.logs,state.query,state.level).length + "줄 · 위로 스크롤해 이전 기록 보기";
   scrollLogs();
 }
 // Coalesce dense SSE traffic into at most one DOM update every 130ms.
@@ -819,6 +1071,7 @@ async function sendCommand() {
   if (state.mode === "demo") {
     const now = new Date().toLocaleTimeString("ko-KR", { hour12:false });
     appendBoundedLog(state.logs,{time:now,level:"DEMO",message:"> "+command.value+" (실제 서버에 미전송)"});
+    rememberCommand(command.value);
     state.command = "";
     const input = $("#console-command");
     if (input) input.value = "";
@@ -833,6 +1086,7 @@ async function sendCommand() {
   if (submit) submit.disabled = true;
   try {
     await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/commands",{method:"POST",body:{command:command.value}});
+    rememberCommand(command.value);
     state.command = ""; if ($("#console-command")) $("#console-command").value = "";
     toast("명령어 전송 요청이 접수되었습니다.");
   } catch (error) { toast(error.message); }
@@ -857,16 +1111,17 @@ async function performPowerAction() {
   }
   try {
     await apiRequest("/servers/"+encodeURIComponent(s.id)+"/actions/"+action,{method:"POST",timeoutMs:action==="restart"?50000:20000});
-    toast("서버 작업 요청이 접수되었습니다."); await loadFromApi();
+    toast("서버 작업 요청이 접수되었습니다."); await pollLiveStatus(true); schedulePoll();
   } catch (error) { toast(error.message); }
 }
 async function openTextFile(name){
   if(state.mode!=="live")return;
   try {
     const path=relativeFile(name);
-    const result=await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files/content?path="+encodeURIComponent(path));
-    setModal({kind:"file-editor",path,content:result.text});
-  } catch(e){toast(e.message);}
+    const result=await apiRequest(fileApi("/content?path="+encodeURIComponent(path)));
+    setModal({kind:"file-editor",path,content:result.text,dirty:false});
+    $("#file-editor-text")?.focus();
+  } catch(e){toast(e.status===415?e.message+" 다운로드해서 확인하세요.":e.message);}
 }
 async function createBackup() {
   setModal(null);
@@ -942,28 +1197,43 @@ function normalizeLiveServer(it){
     mspt:it.mspt==null?null:(Number.isFinite(Number(it.mspt))?Number(it.mspt):null)
   };
 }
-async function pollLiveStatus(){
-  if(!apiEnabled || !state.authenticated || statusPolling || state.loading || document.hidden)return;
-  if(!["dashboard","servers","overview"].includes(state.route))return;
+// Status-only refresh: full re-render only on read-only pages without an open
+// modal; elsewhere just the sidebar and console header so forms keep their input.
+function refreshStatusChrome(){
+  const side=$("#sidebar");if(side)side.outerHTML=renderSidebar();
+  const host=$("#console-status-host");if(host)host.innerHTML=consoleStatus();
+}
+async function pollLiveStatus(force=false){
+  if(!apiEnabled || !state.authenticated || state.loading)return;
+  if(!force && (statusPolling || document.hidden))return;
   statusPolling=true;
   try{
     const result=await apiRequest("/servers");
     const items=Array.isArray(result)?result:result.servers;
     if(!Array.isArray(items))return;
     state.servers=items.filter(x=>x&&typeof x.id==="string"&&typeof x.name==="string").map(normalizeLiveServer);
-    if(["dashboard","overview"].includes(state.route) ||
-       (state.route==="servers" && !["server-search","server-status"].includes(document.activeElement?.id))){
+    if(!state.modal && (["dashboard","overview"].includes(state.route) ||
+       (state.route==="servers" && !["server-search","server-status"].includes(document.activeElement?.id)))){
       render();
-    }
+    }else refreshStatusChrome();
   }catch(e){if(e?.status!==401)state.apiError=e.message;}
   finally{statusPolling=false;}
 }
+// Poll fast (2s) while any server is starting, stopping or waiting to restart.
+let pollingActive=false;
+function schedulePoll(){
+  clearTimeout(statusRefreshTimer);
+  if(!pollingActive)return;
+  const busy=state.servers.some(s=>TRANSITIONAL.includes(s.status));
+  statusRefreshTimer=setTimeout(async()=>{await pollLiveStatus();schedulePoll();},busy?2000:10000);
+}
 function startPolling(){
-  if(statusRefreshTimer!==null)return;
-  statusRefreshTimer=setInterval(()=>pollLiveStatus(),15000);
+  if(pollingActive)return;
+  pollingActive=true;schedulePoll();
 }
 function stopPolling(){
-  if(statusRefreshTimer!==null)clearInterval(statusRefreshTimer);
+  pollingActive=false;
+  clearTimeout(statusRefreshTimer);
   statusRefreshTimer=null;
 }
 
@@ -1016,22 +1286,73 @@ function connectLogStream() {
     state.logError = "실시간 로그 연결이 불안정합니다.";
     const label = $(".console-status");
     if (label?.lastChild?.nodeType === 3) label.lastChild.textContent = "연결 오류";
-  },() => {
+  },async () => {
     if (state.selectedId !== serverId) return;
+    // A dropped stream misses lines; reload the server-side history on reconnect.
+    const resync = Boolean(state.logError);
     state.logError = "";
     const label = $(".console-status");
     if (label?.lastChild?.nodeType === 3) label.lastChild.textContent = "연결됨";
+    if (resync) { await loadSelectedLogs(); updateLogRows(); }
   });
 }
-window.addEventListener("hashchange", () => {
+window.addEventListener("hashchange", async () => {
+  const previous=state.route;
   state.route=routeFromHash(location.hash);state.mobileMenu=false;state.modal=null;
-  cancelLogUpdate();render();connectLogStream();refreshRouteData(); window.scrollTo({top:0,behavior:"auto"});
+  cancelLogUpdate();render();
+  // The stream only runs on the console page; reload what was printed meanwhile.
+  if(state.route==="console" && previous!=="console" && state.mode==="live" && state.selectedId && !state.loading){
+    if(logClose){logClose();logClose=null;}
+    await loadSelectedLogs();
+    if(state.route!=="console")return;
+    state.stickLogs=true;updateLogRows();
+  }
+  connectLogStream();refreshRouteData(); window.scrollTo({top:0,behavior:"auto"});
 });
+function closeModal() {
+  if (state.modal?.kind==="file-editor" && state.modal.dirty && !confirm("저장하지 않은 변경 사항이 있습니다. 닫을까요?")) return;
+  setModal(null);
+}
+const typingTarget = (el) => el && (el.isContentEditable || ["INPUT","TEXTAREA","SELECT"].includes(el.tagName));
+function fileShortcut(event) {
+  if (state.route!=="files" || state.mode!=="live" || state.modal || typingTarget(event.target)) return false;
+  const selected=[...state.fileSelection];
+  if ((event.ctrlKey||event.metaKey) && event.key.toLowerCase()==="a") {
+    state.fileSelection=new Set(visibleFiles().map(f=>f.name));refreshFileSelection();return true;
+  }
+  if (event.key==="Enter" && selected.length===1) { openFileEntry(selected[0]); return true; }
+  if (event.key==="F2" && selected.length===1) { setModal({kind:"file-rename",name:selected[0]}); $("#file-new-name")?.select(); return true; }
+  if (event.key==="Delete" && selected.length) { confirmDelete(selected); return true; }
+  if (event.key==="Backspace" && state.filePath) { openFolder(parentPath(state.filePath)); return true; }
+  if (event.key==="Escape" && selected.length) { state.fileSelection=new Set();refreshFileSelection();return true; }
+  return false;
+}
 document.addEventListener("keydown",(event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==="k") {
     event.preventDefault();state.paletteQuery="";setModal({kind:"palette"});return;
   }
-  if (event.key==="Escape" && state.modal) {event.preventDefault();setModal(null);}
+  if (event.target?.id==="file-editor-text") {
+    if ((event.ctrlKey||event.metaKey) && event.key.toLowerCase()==="s") { event.preventDefault(); $("#file-editor-form")?.requestSubmit(); return; }
+    if (event.key==="Tab" && !event.shiftKey) {
+      event.preventDefault();
+      event.target.setRangeText("  ",event.target.selectionStart,event.target.selectionEnd,"end");
+      event.target.dispatchEvent(new Event("input",{bubbles:true}));
+      return;
+    }
+  }
+  if (event.key==="Escape" && state.modal) {event.preventDefault();closeModal();return;}
+  if (fileShortcut(event)) { event.preventDefault(); return; }
+  if (event.target?.id==="console-command" && (event.key==="ArrowUp" || event.key==="ArrowDown")) {
+    const list=state.commandHistory;
+    if (!list.length) return;
+    event.preventDefault();
+    let index=state.commandIndex<0?list.length:state.commandIndex;
+    index=event.key==="ArrowUp"?Math.max(0,index-1):Math.min(list.length,index+1);
+    state.commandIndex=index;
+    state.command=index>=list.length?"":list[index];
+    event.target.value=state.command;
+    return;
+  }
   if (event.key==="Enter" && event.target?.id==="console-command") {
     event.preventDefault();sendCommand();
   }
@@ -1043,10 +1364,83 @@ document.addEventListener("keydown",(event) => {
 document.addEventListener("input",(event) => {
   if (event.target.id === "log-search") { state.query=event.target.value;scheduleLogUpdate(); }
   if (event.target.id === "server-search") { state.serverQuery=event.target.value;state.serverPage=0;filterServerRows(); }
-  if (event.target.id === "console-command") { state.command=event.target.value; }
+  if (event.target.id === "console-command") { state.command=event.target.value;state.commandIndex=-1; }
+  if (event.target.id === "file-search") {
+    state.fileQuery=event.target.value;
+    const body=$("#file-tbody");if(body){body.innerHTML=renderFileRows();refreshFileSelection();}
+  }
+  if (event.target.id === "file-editor-text" && state.modal?.kind==="file-editor") {
+    state.modal.content=event.target.value;
+    if(!state.modal.dirty){state.modal.dirty=true;const label=$("#editor-state");if(label){label.textContent="수정됨";label.classList.add("dirty");}}
+  }
+  if (["live-java","live-command","live-memory","live-jar"].includes(event.target.id)) {
+    const preview=$("#command-preview");if(preview)preview.textContent=previewCommand(startupFormValues());
+  }
   if (event.target.id === "palette-search") {
     state.paletteQuery=event.target.value;const root=$("#palette-results");if(root)root.innerHTML=paletteItems();
   }
+});
+// Log viewport: remember whether the reader is parked at the bottom.
+document.addEventListener("scroll",(event) => {
+  if (event.target?.id!=="log-viewport") return;
+  const pane=event.target;
+  state.stickLogs=pane.scrollHeight-pane.scrollTop-pane.clientHeight<48;
+},true);
+document.addEventListener("dblclick",async(event) => {
+  if (state.route!=="files" || state.mode!=="live" || event.target.closest("button,input")) return;
+  if (event.target.closest("[data-file-up]")) { await openFolder(parentPath(state.filePath)); return; }
+  const row=event.target.closest("[data-file]");
+  if (row) await openFileEntry(row.dataset.file);
+});
+// Drag and drop: rows move onto folders / ".." / breadcrumbs; desktop files upload.
+const PANEL_DRAG="application/x-panel-files";
+function clearDropMarks(){
+  document.querySelectorAll(".drop-target").forEach(el=>el.classList.remove("drop-target"));
+  $("#file-dropzone")?.classList.remove("dragging");
+}
+document.addEventListener("dragstart",(event) => {
+  const row=event.target.closest?.("[data-file]");
+  if (!row || state.route!=="files") return;
+  const name=row.dataset.file;
+  if (!state.fileSelection.has(name)) { state.fileSelection=new Set([name]); refreshFileSelection(); }
+  event.dataTransfer.setData(PANEL_DRAG,JSON.stringify([...state.fileSelection]));
+  event.dataTransfer.effectAllowed="move";
+});
+document.addEventListener("dragover",(event) => {
+  if (state.route!=="files" || state.mode!=="live") return;
+  const zone=event.target.closest?.("[data-drop-folder], #file-dropzone");
+  if (!zone) return;
+  event.preventDefault();
+  const internal=event.dataTransfer.types.includes(PANEL_DRAG);
+  event.dataTransfer.dropEffect=internal?"move":"copy";
+  const folder=event.target.closest("[data-drop-folder]");
+  document.querySelectorAll(".drop-target").forEach(el=>{if(el!==folder)el.classList.remove("drop-target");});
+  folder?.classList.add("drop-target");
+  if (!internal) $("#file-dropzone")?.classList.add("dragging");
+});
+document.addEventListener("dragleave",(event) => {
+  if (!event.relatedTarget || !$("#file-dropzone")?.contains(event.relatedTarget)) clearDropMarks();
+});
+document.addEventListener("dragend",clearDropMarks);
+document.addEventListener("drop",async(event) => {
+  if (state.route!=="files" || state.mode!=="live") return;
+  const zone=event.target.closest?.("[data-drop-folder], #file-dropzone");
+  if (!zone) return;
+  event.preventDefault();clearDropMarks();
+  const folder=event.target.closest("[data-drop-folder]");
+  const dest=folder ? folder.dataset.dropFolder : state.filePath;
+  const internal=event.dataTransfer.getData(PANEL_DRAG);
+  try {
+    if (internal) {
+      if (dest===state.filePath) return;
+      const moved=await movePaths(JSON.parse(internal),dest);
+      if (moved) toast(moved+"개 항목을 /"+(dest||"")+" 로 옮겼습니다.");
+      state.fileSelection=new Set();
+    } else {
+      await uploadItems(await collectDropped(event.dataTransfer),dest);
+    }
+  } catch(e) { toast(e.message); }
+  await loadFiles();
 });
 document.addEventListener("change",async(event) => {
   if(event.target.id==="new-server-template" && state.mode==="live"){
@@ -1071,20 +1465,32 @@ document.addEventListener("change",async(event) => {
     }
     return;
   }
-  if (event.target.id==="log-autoscroll") {state.autoScroll=event.target.checked;scrollLogs();}
+  if (event.target.id==="log-autoscroll") {state.autoScroll=event.target.checked;state.stickLogs=true;scrollLogs();}
   if (event.target.id==="server-status"){state.serverStatus=event.target.value;state.serverPage=0;filterServerRows();}
-  if (event.target.id==="file-upload-input" && state.mode==="live"){
-    const file=event.target.files?.[0];if(!file)return;
-    try{await uploadFile(state.selectedId,relativeFile(file.name),file);toast("파일 업로드 완료: "+file.name);await loadFiles();}
-    catch(e){toast(e.message);}finally{event.target.value="";}
+  if (["file-upload-input","folder-upload-input"].includes(event.target.id) && state.mode==="live"){
+    // webkitRelativePath keeps the chosen folder's structure.
+    const items=[...(event.target.files||[])].map(file=>({file,path:file.webkitRelativePath||file.name}));
+    try{await uploadItems(items,state.filePath);}
+    catch(e){toast(e.message);}finally{event.target.value="";await loadFiles();}
+  }
+  if (event.target.dataset?.fileCheck!==undefined){
+    const name=event.target.dataset.fileCheck;
+    if(event.target.checked)state.fileSelection.add(name);else state.fileSelection.delete(name);
+    refreshFileSelection();
+  }
+  if (event.target.id==="file-check-all"){
+    state.fileSelection=event.target.checked?new Set(visibleFiles().map(f=>f.name)):new Set();
+    refreshFileSelection();
   }
 });
 document.addEventListener("click",async(event) => {
+  const row = event.target.closest("[data-file]");
+  if (row && state.route==="files" && !event.target.closest("button,input,a")) { selectFile(row.dataset.file,event); return; }
   const target = event.target.closest("[data-action]");if (!target) return;
   const action=target.dataset.action;
   if (action==="navigate") {state.mobileMenu=false;return;}
-  if (action==="modal-background" && event.target===target){setModal(null);return;}
-  if (action==="modal-close"){setModal(null);return;}
+  if (action==="modal-background" && event.target===target){closeModal();return;}
+  if (action==="modal-close"){closeModal();return;}
   if (action==="open-menu" || action==="close-menu"){
     state.mobileMenu = action === "open-menu";
     $("#sidebar")?.classList.toggle("open",state.mobileMenu);
@@ -1107,6 +1513,7 @@ document.addEventListener("click",async(event) => {
   if (action==="server-page-next"){state.serverPage++;filterServerRows();return;}
   if (action==="power-confirm"){
     const power=target.dataset.power || "restart";
+    if (power==="start") { state.modal={power}; await performPowerAction(); return; }
     const title=power==="stop"?"서버를 중지할까요?":power==="restart"?"서버를 재시작할까요?":"서버를 시작할까요?";
     setModal({kind:"confirm",title,description: selectedName()+" 서버에서 실행 중인 작업과 플레이어 연결에 영향을 줄 수 있습니다.",
       power,confirmLabel: power==="stop"?"서버 중지":power==="restart"?"재시작":"시작",confirmAction:"power-run",danger:power==="stop"});return;
@@ -1134,23 +1541,59 @@ document.addEventListener("click",async(event) => {
     return;
   }
   if (action==="file-preview"){await openTextFile(target.dataset.name);return;}
-  if (action==="file-download" && state.mode==="live"){
-    const a=document.createElement("a");
-    a.href=fileDownloadUrl(state.selectedId,relativeFile(target.dataset.name));
-    a.download=target.dataset.name;document.body.appendChild(a);a.click();a.remove();return;
-  }
-  if (action==="file-rename"){setModal({kind:"file-rename",name:target.dataset.name});return;}
+  if (action==="file-download" && state.mode==="live"){downloadEntry(target.dataset.name);return;}
+  if (action==="file-edit"){await openTextFile(target.dataset.name);return;}
+  if (action==="file-rename"){setModal({kind:"file-rename",name:target.dataset.name});$("#file-new-name")?.select();return;}
   if (action==="file-delete"){
-    setModal({kind:"confirm",title:"파일을 삭제할까요?",
-      description:"'"+target.dataset.name+"' 항목을 삭제합니다. 폴더는 비어 있어야 삭제할 수 있습니다.",
-      path:relativeFile(target.dataset.name),confirmLabel:"삭제",confirmAction:"file-delete-run",danger:true});return;
+    if(state.mode!=="live")return mockActionMessage(action);
+    confirmDelete([target.dataset.name]);return;
   }
+  if (action==="file-delete-selected"){confirmDelete([...state.fileSelection]);return;}
+  if (action==="file-download-selected"){
+    const files=[...state.fileSelection].filter(n=>state.fileEntries.find(f=>f.name===n)?.type==="file");
+    if(!files.length)return toast("폴더는 다운로드할 수 없습니다. 파일을 선택하세요.");
+    files.forEach((name,i)=>setTimeout(()=>downloadEntry(name),i*400));return;
+  }
+  if (action==="file-clear-selection"){state.fileSelection=new Set();refreshFileSelection();return;}
+  if (action==="file-goto"){await openFolder(target.dataset.path||"");return;}
+  if (action==="file-refresh"){await loadFiles();return;}
+  if (action==="folder-upload"){$("#folder-upload-input")?.click();return;}
+  if (action==="file-new-file"){setModal({kind:"file-new"});return;}
   if (action==="file-delete-run"){
-    const path=state.modal?.path;setModal(null);
-    if(!path)return;
-    try{await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files?path="+encodeURIComponent(path),{method:"DELETE"});
-      toast("파일이 삭제되었습니다.");state.selectedFile="";await loadFiles();
-    }catch(e){toast(e.message);}return;
+    const paths=state.modal?.paths||(state.modal?.path?[state.modal.path]:[]);setModal(null);
+    if(!paths.length)return;
+    try{
+      for(const path of paths)await apiRequest(fileApi("?path="+encodeURIComponent(path)),{method:"DELETE"});
+      toast(paths.length+"개 항목을 삭제했습니다.");state.fileSelection=new Set();
+    }catch(e){toast(e.message);}
+    await loadFiles();return;
+  }
+  if (action==="open-log-folder"){state.filePath="logs";state.fileSelection=new Set();state.fileQuery="";navigate("files");return;}
+  if (action==="auto-restart-toggle" && state.mode==="live"){
+    const s=server();if(!s)return;
+    try{
+      await apiRequest("/servers/"+encodeURIComponent(s.id)+"/startup",{method:"PATCH",body:{autoRestart:!s.autoRestart}});
+      toast("자동 재시작을 "+(s.autoRestart?"껐습니다.":"켰습니다."));await pollLiveStatus(true);
+    }catch(e){toast(e.message);}
+    return;
+  }
+  if (action==="java-detect"){state.javaInstalls=null;await detectJavaInstalls();return;}
+  if (action==="java-pick"){
+    const input=$("#live-java");if(input){input.value=target.dataset.path;input.dispatchEvent(new Event("input",{bubbles:true}));}
+    const host=$("#java-list");if(host)host.innerHTML=renderJavaList();return;
+  }
+  if (action==="startup-command-reset"){
+    const input=$("#live-command");if(input){input.value="";input.dispatchEvent(new Event("input",{bubbles:true}));}return;
+  }
+  if (action==="user-delete"){
+    const name=target.dataset.name;
+    setModal({kind:"confirm",title:"'"+name+"' 계정을 삭제할까요?",description:"이 계정으로 로그인한 세션이 즉시 끊어지며 되돌릴 수 없습니다.",
+      name,confirmLabel:"계정 삭제",confirmAction:"user-delete-run",danger:true});return;
+  }
+  if (action==="user-delete-run"){
+    const name=state.modal?.name;setModal(null);if(!name)return;
+    try{await apiRequest("/users/"+encodeURIComponent(name),{method:"DELETE"});toast("계정을 삭제했습니다.");await refreshRouteData();}
+    catch(e){toast(e.message);}return;
   }
   if (action==="backup-create"){setModal({kind:"confirm",title:"새 백업을 생성할까요?",description:"현재 월드 상태를 백업합니다.",
     confirmLabel:"백업 생성",confirmAction:"backup-run"});return;}
@@ -1241,7 +1684,7 @@ document.addEventListener("click",async(event) => {
   if (action==="logout"){
     try{await signOut();}catch(e){toast(e.message);}
     if(logClose){logClose();logClose=null;}
-    stopPolling();state.authenticated=false;state.authError="";state.logs=[];state.servers=[];render();return;
+    stopPolling();state.authenticated=false;state.authError="";state.logs=[];state.servers=[];state.users=[];render();return;
   }
   if (["network-add","user-invite"].includes(action)){mockActionMessage(action);return;}
   if (action==="log-level"){
@@ -1257,16 +1700,26 @@ document.addEventListener("click",async(event) => {
 });
 document.addEventListener("submit",async(event) => {
   const form=event.target;
-  if(form.id==="login-form"){
+  if(form.id==="login-form" || form.id==="setup-form"){
     event.preventDefault();
-    const password=String(new FormData(form).get("password")||"");
+    const d=new FormData(form);
+    const username=String(d.get("username")||"").trim(),password=String(d.get("password")||"");
+    if(form.id==="setup-form" && password!==String(d.get("password2")||"")){state.authError="비밀번호 확인이 일치하지 않습니다.";render();return;}
     const submit=form.querySelector('[type="submit"]');if(submit)submit.disabled=true;
-    try{const session=await signIn(password);state.authenticated=true;state.authError="";state.username=session.username||"관리자";startPolling();await loadFromApi();}
-    catch(e){state.authError=e.message;render();}
+    try{
+      const session=form.id==="setup-form"?await setupAccount(username,password):await signIn(username,password);
+      state.authenticated=true;state.authError="";state.setupRequired=false;state.username=session.username||username;
+      startPolling();await loadFromApi();
+    }
+    catch(e){
+      state.authError=e.message;
+      if(e.status===409)state.setupRequired=false;
+      render();
+    }
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
   }
-  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","jar-upgrade-form"].includes(form.id))return;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="jar-upgrade-form"){
     const template=state.startupLive?.template;
@@ -1279,17 +1732,42 @@ document.addEventListener("submit",async(event) => {
   }
   if(form.id==="console-form"){await sendCommand();return;}
   if(form.id==="file-editor-form"){
-    const path=state.modal?.path;if(!path)return;
-    try{const bytes=new Blob([String(new FormData(form).get("content")||"")],{type:"application/octet-stream"});
-      await uploadFile(state.selectedId,path,bytes);setModal(null);toast("파일을 저장했습니다.");await loadFiles();}
-    catch(e){toast(e.message);}return;
+    const modal=state.modal,path=modal?.path;if(!path)return;
+    const text=String(new FormData(form).get("content")||"");
+    try{
+      await uploadFile(state.selectedId,path,new Blob([text],{type:"application/octet-stream"}));
+      if(state.modal===modal){
+        modal.dirty=modal.content!==text;
+        const label=$("#editor-state");if(label&&!modal.dirty){label.textContent="저장됨";label.classList.remove("dirty");}
+      }
+      toast("저장했습니다: "+path);await loadFiles({quiet:true});
+    }catch(e){toast(e.message);}return;
   }
-  if(form.id==="folder-create-form" || form.id==="file-rename-form"){
+  if(form.id==="folder-create-form" || form.id==="file-rename-form" || form.id==="file-create-form"){
     const name=String(new FormData(form).get("name")||"").trim();if(!name)return;
     try{
-      if(form.id==="folder-create-form")await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files/mkdir",{method:"POST",body:{path:relativeFile(name)}});
-      else await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/files/rename",{method:"PATCH",body:{from:relativeFile(state.modal?.name||""),to:relativeFile(name)}});
-      setModal(null);state.selectedFile="";await loadFiles();toast("파일 작업이 완료되었습니다.");
+      if(form.id==="folder-create-form")await apiRequest(fileApi("/mkdir"),{method:"POST",body:{path:relativeFile(name)}});
+      else if(form.id==="file-create-form"){
+        if(state.fileEntries.some(f=>f.name===name))return toast("같은 이름의 항목이 이미 있습니다.");
+        await uploadFile(state.selectedId,relativeFile(name),new Blob([],{type:"application/octet-stream"}));
+      }
+      else await apiRequest(fileApi("/rename"),{method:"PATCH",body:{from:relativeFile(state.modal?.name||""),to:relativeFile(name)}});
+      setModal(null);state.fileSelection=new Set([name]);await loadFiles();
+      if(form.id==="file-create-form")await openTextFile(name);else toast("완료되었습니다.");
+    }catch(e){toast(e.message);}return;
+  }
+  if(form.id==="user-create-form"){
+    const d=new FormData(form);
+    try{
+      await apiRequest("/users",{method:"POST",body:{username:String(d.get("new-username")||"").trim(),password:String(d.get("new-user-password")||"")}});
+      toast("계정을 만들었습니다.");form.reset();await refreshRouteData();
+    }catch(e){toast(e.message);}return;
+  }
+  if(form.id==="password-form"){
+    const d=new FormData(form);
+    try{
+      await apiRequest("/auth/password",{method:"POST",body:{current:String(d.get("current-password")||""),password:String(d.get("next-password")||"")}});
+      toast("비밀번호를 변경했습니다. 다른 기기의 로그인은 종료됩니다.");form.reset();
     }catch(e){toast(e.message);}return;
   }
   if(form.id==="startup-form"){
@@ -1303,9 +1781,10 @@ document.addEventListener("submit",async(event) => {
         await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/startup",{
           method:"PATCH",body:{name:String(d.get("live-name")||""),
             memoryMb:Number(d.get("live-memory")),jar:String(d.get("live-jar")||"server.jar"),
+            javaBin:String(d.get("live-java")||"").trim(),startCommand:String(d.get("live-command")||"").trim(),
             eulaAccepted:d.has("live-eula"),autoRestart:d.has("live-auto-restart")}
         });
-        toast("시작 설정을 저장했습니다.");await refreshRouteData();await loadFromApi();
+        toast("시작 설정을 저장했습니다. 다음 시작부터 적용됩니다.");await refreshRouteData();await pollLiveStatus(true);
       }catch(e){toast(e.message);}
     }
     return;

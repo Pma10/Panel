@@ -21,7 +21,7 @@ test("visible log window is capped independently and ordered chronologically", (
   const history = Array.from({length:1600},(_,i)=>row(i,i%2?"WARN":"INFO"));
   const latest = recentLogs(history);
   assert.equal(latest.length,MAX_VISIBLE_LOGS);
-  assert.equal(latest[0].message,"메시지 1480");
+  assert.equal(latest[0].message,"메시지 "+(1600-MAX_VISIBLE_LOGS));
   assert.equal(latest.at(-1).message,"메시지 1599");
   const warning = recentLogs(history,"메시지 15","warn",8);
   assert.ok(warning.length<=8);

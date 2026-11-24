@@ -18,7 +18,8 @@ func testPanel(t *testing.T)(*manager,*httptest.Server){
  t.Helper()
  manager,err:=newManager(t.TempDir(),"java")
  if err!=nil{t.Fatal(err)}
- service:=newPanelAPI(manager,"http://127.0.0.1:1","integration-test-password-12345")
+ service,apiErr:=newPanelAPI(manager,"http://127.0.0.1:1","integration-test-password-12345")
+ if apiErr!=nil{panic(apiErr)}
  server:=httptest.NewServer(service)
  service.auth.origin=server.URL
  service.origin=server.URL
@@ -134,7 +135,7 @@ func TestGoConsoleMemoryIsBounded(t *testing.T){
  for i:=0;i<10000;i++{manager.log(id,"INFO",strings.Repeat("A",2500))}
  items,err:=manager.history(id)
  if err!=nil{t.Fatal(err)}
- if len(items)>400{t.Fatalf("history size %d",len(items))}
+ if len(items)>maxLogEntries{t.Fatalf("history size %d",len(items))}
  if len(items[0].Message)>2048{t.Fatalf("message length %d",len(items[0].Message))}
 }
 func TestGoStaticFrontendAndConfig(t *testing.T){

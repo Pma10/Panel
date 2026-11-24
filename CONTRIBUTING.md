@@ -17,7 +17,7 @@ Panel은 **경량 Go 기반 단일 호스트 Minecraft 서버 패널**을 목표
 
 ## 로컬 검증
 
-Go 1.23 이상과 Git이 필요합니다. Minecraft 서버 통합 테스트에는 Java가 별도로 필요합니다.
+Go 1.24 이상과 Git이 필요합니다. Minecraft 서버 통합 테스트에는 Java가 별도로 필요합니다.
 
 ~~~bash
 gofmt -w *.go

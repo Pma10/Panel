@@ -1,5 +1,5 @@
 # Build the Go binary and embed the static Korean web interface.
-FROM golang:1.23-bookworm AS build
+FROM golang:1.24-bookworm AS build
 WORKDIR /build
 COPY go.mod ./
 COPY *.go ./

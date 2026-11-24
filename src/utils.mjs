@@ -46,7 +46,7 @@ export function routeFromHash(hash) {
  * the complete log array on every SSE message.
  */
 export const MAX_LOG_ENTRIES = 1200;
-export const MAX_VISIBLE_LOGS = 120;
+export const MAX_VISIBLE_LOGS = 1000;
 export const MAX_LOG_CHARS = 4096;
 
 export function appendBoundedLog(entries, raw, limit = MAX_LOG_ENTRIES) {

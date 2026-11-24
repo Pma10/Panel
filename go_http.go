@@ -25,8 +25,10 @@ type panelAPI struct{
  closed chan struct{}
  closeOnce sync.Once
 }
-func newPanelAPI(m *manager, origin,password string)*panelAPI{
- return &panelAPI{manager:m,auth:newAuthenticator(password,origin),origin:origin,audit:newAudit(m.root),closed:make(chan struct{})}
+func newPanelAPI(m *manager, origin,bootstrapPassword string)(*panelAPI,error){
+ auth,err:=newAuthenticator(filepath.Join(m.root,"users.json"),bootstrapPassword,origin)
+ if err!=nil{return nil,err}
+ return &panelAPI{manager:m,auth:auth,origin:origin,audit:newAudit(m.root),closed:make(chan struct{})},nil
 }
 func (a *panelAPI)closeStreams(){a.closeOnce.Do(func(){close(a.closed)})}
 func jsonReply(w http.ResponseWriter,status int,value any){
@@ -89,7 +91,8 @@ func (a *panelAPI)ServeHTTP(w http.ResponseWriter,r *http.Request){
  defer asset.Close()
  info,err:=asset.Stat()
  if err!=nil||!info.Mode().IsRegular(){http.NotFound(w,r);return}
- if file=="/index.html"{h.Set("Cache-Control","no-cache")}else{h.Set("Cache-Control","public, max-age=3600")}
+ // Revalidate every asset: a long cache mixed old JS with a new API after upgrades.
+ h.Set("Cache-Control","no-cache")
  contentType:=mime.TypeByExtension(filepath.Ext(relative))
  if contentType==""{contentType="application/octet-stream"}
  h.Set("Content-Type",contentType)
@@ -103,21 +106,60 @@ func (a *panelAPI)ServeHTTP(w http.ResponseWriter,r *http.Request){
 func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
  url:=strings.TrimPrefix(r.URL.Path,"/api/v1/")
  parts:=strings.Split(url,"/")
+ if url=="auth/setup"{
+  if r.Method=="GET"{jsonReply(w,200,map[string]bool{"required":a.auth.setupRequired()});return nil}
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  var body struct{Username string `json:"username"`;Password string `json:"password"`}
+  if err:=decodeBody(r,&body);err!=nil{return err}
+  token,csrf,err:=a.auth.setup(r,body.Username,body.Password);if err!=nil{return err}
+  a.audit.append(body.Username,"POST /auth/setup","")
+  http.SetCookie(w,a.auth.cookie(token))
+  jsonReply(w,200,map[string]any{"authenticated":true,"username":body.Username,"csrf":csrf});return nil
+ }
  if url=="auth/login"{
   if err:=assertMethod(r,"POST");err!=nil{return err}
-  var body struct{Password string `json:"password"`}
+  var body struct{Username string `json:"username"`;Password string `json:"password"`}
   if err:=decodeBody(r,&body);err!=nil{return err}
-  token,csrf,err:=a.auth.login(r,body.Password);if err!=nil{return err}
+  if body.Username==""{body.Username="admin"}
+  token,csrf,err:=a.auth.login(r,body.Username,body.Password);if err!=nil{return err}
   http.SetCookie(w,a.auth.cookie(token))
-  jsonReply(w,200,map[string]any{"authenticated":true,"username":"관리자","csrf":csrf});return nil
+  jsonReply(w,200,map[string]any{"authenticated":true,"username":body.Username,"csrf":csrf});return nil
  }
  token,session,err:=a.auth.session(r);if err!=nil{return err}
  if r.Method!="GET" && r.Method!="HEAD"{
   if err:=a.auth.requireMutation(r,session);err!=nil{return err}
  }
+ actor:=session.username
  if url=="auth/session"{
   if err:=assertMethod(r,"GET");err!=nil{return err}
-  jsonReply(w,200,map[string]any{"authenticated":true,"username":"관리자","csrf":session.csrf});return nil
+  jsonReply(w,200,map[string]any{"authenticated":true,"username":actor,"csrf":session.csrf});return nil
+ }
+ if url=="auth/password"{
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  var body struct{Current string `json:"current"`;Password string `json:"password"`}
+  if err:=decodeBody(r,&body);err!=nil{return err}
+  if err:=a.auth.changePassword(token,actor,body.Current,body.Password);err!=nil{return err}
+  a.audit.append(actor,"POST /auth/password","")
+  jsonReply(w,200,map[string]bool{"changed":true});return nil
+ }
+ if url=="users"{
+  if r.Method=="GET"{jsonReply(w,200,map[string]any{"users":a.auth.listUsers(),"current":actor});return nil}
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  var body struct{Username string `json:"username"`;Password string `json:"password"`}
+  if err:=decodeBody(r,&body);err!=nil{return err}
+  if err:=a.auth.createUser(body.Username,body.Password);err!=nil{return err}
+  a.audit.append(actor,"POST /users "+body.Username,"")
+  jsonReply(w,201,map[string]bool{"created":true});return nil
+ }
+ if len(parts)==2 && parts[0]=="users"{
+  if err:=assertMethod(r,"DELETE");err!=nil{return err}
+  if err:=a.auth.deleteUser(parts[1],actor);err!=nil{return err}
+  a.audit.append(actor,"DELETE /users "+parts[1],"")
+  jsonReply(w,200,map[string]bool{"deleted":true});return nil
+ }
+ if url=="java"{
+  if err:=assertMethod(r,"GET");err!=nil{return err}
+  jsonReply(w,200,map[string]any{"installations":detectJava(r.Context(),a.manager.javaBin),"defaultCommand":defaultStartCommand});return nil
  }
  if url=="auth/logout"{
   if err:=assertMethod(r,"POST");err!=nil{return err}
@@ -151,7 +193,7 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
    var input serverConfig
    if err:=decodeBody(r,&input);err!=nil{return err}
    created,err:=a.manager.create(input);if err!=nil{return err}
-   a.audit.append("POST /servers",fmt.Sprint(created["id"]))
+   a.audit.append(actor,"POST /servers",fmt.Sprint(created["id"]))
    jsonReply(w,201,created);return nil
   default:return apiError{405,"허용하지 않은 방식입니다."}
   }
@@ -182,7 +224,7 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   var values map[string]json.RawMessage
   if err:=decodeBody(r,&values);err!=nil{return err}
   result,err:=a.manager.update(id,values);if err!=nil{return err}
-  a.audit.append("PATCH /startup",id);jsonReply(w,200,result);return nil
+  a.audit.append(actor,"PATCH /startup",id);jsonReply(w,200,result);return nil
  }
  if rest=="logs"{
   if err:=assertMethod(r,"GET");err!=nil{return err}
@@ -198,7 +240,7 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   var body struct{Command string `json:"command"`}
   if err:=decodeBody(r,&body);err!=nil{return err}
   if err:=a.manager.command(id,body.Command);err!=nil{return err}
-  a.audit.append("POST /commands",id)
+  a.audit.append(actor,"POST /commands",id)
   jsonReply(w,202,map[string]bool{"accepted":true});return nil
  }
  if strings.HasPrefix(rest,"actions/"){
@@ -213,7 +255,7 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   default:return apiError{400,"지원하지 않는 작업입니다."}
   }
   if err!=nil{return err}
-  a.audit.append("POST /actions/"+action,id)
+  a.audit.append(actor,"POST /actions/"+action,id)
   jsonReply(w,202,response);return nil
  }
  if rest=="install"{
@@ -221,7 +263,7 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   var data struct{Template string `json:"template"`; Version string `json:"version"`}
   if err:=decodeBody(r,&data);err!=nil{return err}
   result,err:=a.manager.installTemplate(r.Context(),id,data.Template,data.Version,false);if err!=nil{return err}
-  a.audit.append("POST /install",id)
+  a.audit.append(actor,"POST /install",id)
   jsonReply(w,201,result);return nil
  }
  if rest=="install/upgrade"{
@@ -230,18 +272,18 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   if err:=decodeBody(r,&data);err!=nil{return err}
   result,err:=a.manager.installTemplate(r.Context(),id,data.Template,data.Version,true)
   if err!=nil{return err}
-  a.audit.append("POST /install/upgrade",id)
+  a.audit.append(actor,"POST /install/upgrade",id)
   jsonReply(w,201,result);return nil
  }
  if rest=="install/rollback"{
   if err:=assertMethod(r,"POST");err!=nil{return err}
   result,err:=a.manager.rollbackJar(id)
   if err!=nil{return err}
-  a.audit.append("POST /install/rollback",id)
+  a.audit.append(actor,"POST /install/rollback",id)
   jsonReply(w,200,result);return nil
  }
  if strings.HasPrefix(rest,"files") {
-  return a.filesRoute(w,r,id,rest)
+  return a.filesRoute(w,r,id,rest,actor)
  }
  if rest=="backups"{
   if r.Method=="GET"{
@@ -250,18 +292,18 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   }
   if err:=assertMethod(r,"POST");err!=nil{return err}
   item,err:=a.manager.backup(r.Context(),id);if err!=nil{return err}
-  a.audit.append("POST /backups",id);jsonReply(w,201,item);return nil
+  a.audit.append(actor,"POST /backups",id);jsonReply(w,201,item);return nil
  }
  if len(parts)==4 && parts[2]=="backups"{
   if err:=assertMethod(r,"DELETE");err!=nil{return err}
   if err:=a.manager.deleteBackup(id,parts[3]);err!=nil{return err}
-  a.audit.append("DELETE /backups",id)
+  a.audit.append(actor,"DELETE /backups",id)
   jsonReply(w,200,map[string]bool{"deleted":true});return nil
  }
  if len(parts)==5 && parts[2]=="backups" && parts[4]=="restore"{
   if err:=assertMethod(r,"POST");err!=nil{return err}
   result,err:=a.manager.restore(r.Context(),id,parts[3]);if err!=nil{return err}
-  a.audit.append("POST /backups/restore",id);jsonReply(w,200,result);return nil
+  a.audit.append(actor,"POST /backups/restore",id);jsonReply(w,200,result);return nil
  }
  if rest=="schedules"{
   if r.Method=="GET"{list,err:=a.manager.schedules(id);if err!=nil{return err};jsonReply(w,200,map[string]any{"schedules":list});return nil}
@@ -269,12 +311,12 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
   var input schedule
   if err:=decodeBody(r,&input);err!=nil{return err}
   result,err:=a.manager.addSchedule(id,input);if err!=nil{return err}
-  a.audit.append("POST /schedules",id);jsonReply(w,201,result);return nil
+  a.audit.append(actor,"POST /schedules",id);jsonReply(w,201,result);return nil
  }
  if len(parts)==4 && parts[2]=="schedules"{
   if err:=assertMethod(r,"DELETE");err!=nil{return err}
   if err:=a.manager.deleteSchedule(id,parts[3]);err!=nil{return err}
-  a.audit.append("DELETE /schedules",id);jsonReply(w,200,map[string]bool{"deleted":true});return nil
+  a.audit.append(actor,"DELETE /schedules",id);jsonReply(w,200,map[string]bool{"deleted":true});return nil
  }
  return apiError{404,"API를 찾을 수 없습니다."}
 }

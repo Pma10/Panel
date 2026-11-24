@@ -61,8 +61,8 @@ func run() error {
  if host != "127.0.0.1" && host != "::1" && host != "localhost" && !strings.HasPrefix(origin, "https://") {
   return errors.New("public bind requires an HTTPS reverse proxy")
  }
- if password := os.Getenv("PANEL_ADMIN_PASSWORD"); len(password) < 12 {
-  return errors.New("set PANEL_ADMIN_PASSWORD (12 or more characters)")
+ if password := os.Getenv("PANEL_ADMIN_PASSWORD"); password != "" && len(password) < 12 {
+  return errors.New("PANEL_ADMIN_PASSWORD must be 12 or more characters (or unset it and create an account in the browser)")
  }
  root, err := filepath.Abs(envDefault("PANEL_DATA_DIR", ".panel-data"))
  if err != nil { return err }
@@ -72,7 +72,18 @@ func run() error {
  defer release()
  manager, err := newManager(root, envDefault("PANEL_JAVA_BIN", "java"))
  if err != nil { return err }
- api := newPanelAPI(manager, origin, os.Getenv("PANEL_ADMIN_PASSWORD"))
+ api, err := newPanelAPI(manager, origin, os.Getenv("PANEL_ADMIN_PASSWORD"))
+ if err != nil { return err }
+ if api.auth.setupRequired() {
+  // Do not leave the first-account form open to the internet.
+  // A reverse proxy (non-loopback origin) also makes it reachable from outside.
+  loopback := (host == "127.0.0.1" || host == "::1" || host == "localhost") &&
+   (parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1" || parsed.Hostname() == "localhost")
+  if !loopback {
+   return errors.New("no accounts yet: set PANEL_ADMIN_PASSWORD once to create the admin account when the panel is reachable from other machines")
+  }
+  log.Printf("No accounts yet: open %s to create the first account", origin)
+ }
  addr := net.JoinHostPort(host, port)
  srv := &http.Server{
   Addr: addr, Handler: api, ReadHeaderTimeout: 8*time.Second,

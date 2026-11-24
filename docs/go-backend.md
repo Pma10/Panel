@@ -8,7 +8,7 @@
 
 ## 설치
 
-Go 1.23 이상과 서버 버전에 맞는 Java를 설치합니다. 아래는 Bash 로컬 실행 예제입니다.
+Go 1.24 이상과 서버 버전에 맞는 Java를 설치합니다. 아래는 Bash 로컬 실행 예제입니다.
 
 ```bash
 git clone --branch main https://github.com/Pma10/Panel.git
@@ -24,7 +24,7 @@ Windows는 `go build -o pconn.exe .`와 PowerShell 환경 변수 설정을 사�
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PANEL_ADMIN_PASSWORD` | **필수** | 12자 이상의 관리자 비밀번호 |
+| `PANEL_ADMIN_PASSWORD` | 선택 | 계정이 없을 때 `admin` 계정을 만들 비밀번호(12자 이상). 로컬 전용이 아니면 첫 실행에 필수. 계정은 `PANEL_DATA_DIR/users.json`에 PBKDF2 해시로 저장 |
 | `PANEL_PORT` | `4173` | 패널 접속 포트 |
 | `PANEL_BIND_HOST` | `127.0.0.1` | 바인딩 주소 |
 | `PANEL_PUBLIC_ORIGIN` | `http://127.0.0.1:4173` | 관리자 브라우저의 실제 출처 |

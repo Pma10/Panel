@@ -41,9 +41,9 @@ func newAudit(root string)*auditLog{
  }
  return a
 }
-func (a *auditLog)append(action,serverID string){
+func (a *auditLog)append(actor,action,serverID string){
  a.mu.Lock();defer a.mu.Unlock()
- entry:=auditEntry{Time:time.Now().UTC().Format(time.RFC3339),Action:action,ServerID:serverID,Actor:"관리자"}
+ entry:=auditEntry{Time:time.Now().UTC().Format(time.RFC3339),Action:action,ServerID:serverID,Actor:actor}
  a.entries=append(a.entries,entry)
  if len(a.entries)>500{a.entries=a.entries[len(a.entries)-500:]}
  file,err:=os.OpenFile(a.path,os.O_CREATE|os.O_APPEND|os.O_WRONLY,0600)

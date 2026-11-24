@@ -29,7 +29,7 @@ func TestBoundedHistoricalMinecraftLogRecovery(t *testing.T){
  t.Cleanup(func(){_ = resumed.shutdown(context.Background())})
  entries,err:=resumed.history(id)
  if err!=nil{t.Fatal(err)}
- if len(entries)==0||len(entries)>100{t.Fatalf("expected bounded recovery, got %d lines",len(entries))}
+ if len(entries)==0||len(entries)>300{t.Fatalf("expected bounded recovery, got %d lines",len(entries))}
  final:=entries[len(entries)-1]
  if final.Level!="ERROR"||!strings.Contains(final.Message,"Last line"){t.Fatalf("bad final entry: %+v",final)}
 }

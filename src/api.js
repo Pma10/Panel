@@ -42,8 +42,12 @@ export async function getSession(){
   const data=await apiRequest("/auth/session");
   setCsrf(data.csrf);return data;
 }
-export async function signIn(password){
-  const data=await apiRequest("/auth/login",{method:"POST",body:{password},anonymous:true});
+export async function signIn(username,password){
+  const data=await apiRequest("/auth/login",{method:"POST",body:{username,password},anonymous:true});
+  setCsrf(data.csrf);return data;
+}
+export async function setupAccount(username,password){
+  const data=await apiRequest("/auth/setup",{method:"POST",body:{username,password},anonymous:true});
   setCsrf(data.csrf);return data;
 }
 export async function signOut(){

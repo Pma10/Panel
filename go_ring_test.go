@@ -17,15 +17,15 @@ func TestFixedConsoleRingPreservesNewestEntriesInOrder(t *testing.T){
  for i:=0;i<2000;i++{m.log(id,"INFO",fmt.Sprintf("line-%d",i))}
  result,err:=m.history(id)
  if err!=nil{t.Fatal(err)}
- if len(result)!=400{t.Fatalf("expected exactly 400 entries, got %d",len(result))}
+ if len(result)!=maxLogEntries{t.Fatalf("expected exactly %d entries, got %d",maxLogEntries,len(result))}
  for i,item:=range result{
-  expected:=fmt.Sprintf("line-%d",i+1600)
+  expected:=fmt.Sprintf("line-%d",i+2000-maxLogEntries)
   if item.Message!=expected{t.Fatalf("entry %d: wanted %q, got %q",i,expected,item.Message)}
  }
  m.mu.Lock()
  backing:=cap(m.servers[id].logs)
  m.mu.Unlock()
- if backing>1024{t.Fatalf("excessive backing allocation: %d",backing)}
+ if backing>2*maxLogEntries{t.Fatalf("excessive backing allocation: %d",backing)}
 }
 func BenchmarkFixedConsoleRing(b *testing.B){
  m,err:=newManager(b.TempDir(),"java")

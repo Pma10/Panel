@@ -47,8 +47,10 @@ func (m *manager) filePath(id,path string,allowMissing bool)(string,error){
  }
  return current,nil
 }
+// File edits are allowed while the server runs; the busy flag still
+// serializes them against backups, restores and JAR installs.
 func (m *manager) beginMutation(id string)(func(),error){
- _,release,err:=m.acquireMutation(id,true)
+ _,release,err:=m.acquireMutation(id,false)
  return release,err
 }
 func (m *manager) listFiles(id,rel string)([]map[string]any,error){
@@ -142,18 +144,20 @@ func (m *manager) deleteFile(id,rel string)error{
  release,err:=m.beginMutation(id);if err!=nil{return err};defer release()
  if rel==""||rel=="."{return apiError{400,"서버 루트 폴더는 삭제할 수 없습니다."}}
  full,err:=m.filePath(id,rel,false);if err!=nil{return err}
- return os.Remove(full) // Nonempty directories are not deleted recursively.
+ // RemoveAll never follows symlinks inside the tree; filePath already
+ // rejected a symlinked target or parent.
+ return os.RemoveAll(full)
 }
 func (m *manager) renameFile(id,from,to string)error{
  release,err:=m.beginMutation(id);if err!=nil{return err};defer release()
  if from==""||from=="."||to==""||to=="."{return apiError{400,"파일 이름을 지정하세요."}}
  old,err:=m.filePath(id,from,false);if err!=nil{return err}
  newPath,err:=m.filePath(id,to,true);if err!=nil{return err}
- if filepath.Dir(old)!=filepath.Dir(newPath){return apiError{400,"같은 폴더 안에서만 이름을 변경할 수 있습니다."}}
+ if newPath==old||strings.HasPrefix(newPath,old+string(filepath.Separator)){return apiError{400,"폴더를 자기 자신 안으로 옮길 수 없습니다."}}
  if _,err:=os.Lstat(newPath);err==nil{return apiError{409,"대상 파일이 이미 있습니다."}}else if !errors.Is(err,os.ErrNotExist){return err}
  return os.Rename(old,newPath)
 }
-func (a *panelAPI)filesRoute(w http.ResponseWriter,r *http.Request,id,route string)error{
+func (a *panelAPI)filesRoute(w http.ResponseWriter,r *http.Request,id,route,actor string)error{
  rel:=r.URL.Query().Get("path")
  switch route{
  case "files":
@@ -163,7 +167,7 @@ func (a *panelAPI)filesRoute(w http.ResponseWriter,r *http.Request,id,route stri
   }
   if err:=assertMethod(r,"DELETE");err!=nil{return err}
   if err:=a.manager.deleteFile(id,rel);err!=nil{return err}
-  a.audit.append("DELETE /files",id)
+  a.audit.append(actor,"DELETE /files",id)
   jsonReply(w,200,map[string]bool{"deleted":true});return nil
  case "files/content":
   if err:=assertMethod(r,"GET");err!=nil{return err}
@@ -183,21 +187,21 @@ func (a *panelAPI)filesRoute(w http.ResponseWriter,r *http.Request,id,route stri
   if err:=assertMethod(r,"PUT");err!=nil{return err}
   if !strings.HasPrefix(r.Header.Get("Content-Type"),"application/octet-stream"){return apiError{415,"바이너리 업로드만 허용합니다."}}
   size,err:=a.manager.uploadFile(id,rel,r.Body);if err!=nil{return err}
-  a.audit.append("PUT /files/upload",id)
+  a.audit.append(actor,"PUT /files/upload",id)
   jsonReply(w,201,map[string]any{"path":rel,"size":size});return nil
  case "files/mkdir":
   if err:=assertMethod(r,"POST");err!=nil{return err}
   var input struct{Path string `json:"path"`}
   if err:=decodeBody(r,&input);err!=nil{return err}
   if err:=a.manager.mkdirFile(id,input.Path);err!=nil{return err}
-  a.audit.append("POST /files/mkdir",id)
+  a.audit.append(actor,"POST /files/mkdir",id)
   jsonReply(w,201,map[string]bool{"created":true});return nil
  case "files/rename":
   if err:=assertMethod(r,"PATCH");err!=nil{return err}
   var input struct{From string `json:"from"`;To string `json:"to"`}
   if err:=decodeBody(r,&input);err!=nil{return err}
   if err:=a.manager.renameFile(id,input.From,input.To);err!=nil{return err}
-  a.audit.append("PATCH /files/rename",id)
+  a.audit.append(actor,"PATCH /files/rename",id)
   jsonReply(w,200,map[string]bool{"renamed":true});return nil
  default:return apiError{404,"파일 API를 찾을 수 없습니다."}
  }

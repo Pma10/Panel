@@ -16,7 +16,8 @@
 | `go_main.go` | 환경 설정 검증, 단일 실행 파일 진입점, 시그널·HTTP 종료 |
 | `go_manager.go` | 관리 서버 상태, Java 프로세스, 고정 크기 로그 순환 버퍼 |
 | `go_http.go` | 인증된 /api/v1 라우팅과 SSE, 임베디드 프런트엔드 |
-| `go_auth.go` | 관리자 세션·요청 출처·CSRF |
+| `go_auth.go` | 계정(users.json, PBKDF2)·세션·요청 출처·CSRF |
+| `go_java.go` | 설치된 Java 검색, 실행 명령어 템플릿 해석 |
 | `go_files.go` | 서버 디렉터리에 한정된 파일 스트리밍·업로드 |
 | `go_templates.go` | 공식 Paper/Folia 안정 JAR, 무결성 확인, 이전 버전 복구 |
 | `go_backups.go` | 일관성 있는 정지 상태 백업·복원 및 예약 작업 정의 |

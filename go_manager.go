@@ -25,6 +25,8 @@ type serverConfig struct {
  MemoryMb int `json:"memoryMb"`
  Port int `json:"port"`
  Jar string `json:"jar"`
+ JavaBin string `json:"javaBin,omitempty"`
+ StartCommand string `json:"startCommand,omitempty"`
  EulaAccepted bool `json:"eulaAccepted"`
  AutoRestart bool `json:"autoRestart"`
  Template string `json:"template"`
@@ -116,7 +118,7 @@ func (m *manager)loadPreviousLog(id string){
  buf,err:=io.ReadAll(io.LimitReader(file,maxTail));if err!=nil{return}
  lines:=strings.Split(string(buf),"\n")
  if offset>0 && len(lines)>0{lines=lines[1:]}
- if len(lines)>100{lines=lines[len(lines)-100:]}
+ if len(lines)>300{lines=lines[len(lines)-300:]}
  loaded:=[]logEntry{}
  for _,line:=range lines{
   line=strings.TrimSpace(line)
@@ -152,6 +154,7 @@ func (m *manager) saveLocked()error{
 func (m *manager) describe(s *managedServer)map[string]any{
  state,uptime:="stopped","—"
  if s.process!=nil{state=s.process.state;uptime=fmt.Sprintf("%d초",int(time.Since(s.process.started).Seconds()))}
+ if s.process==nil&&m.pendingRestarts[s.cfg.ID]!=nil{state="restarting"}
  if s.process==nil&&orphanJavaRunning(m.dir(s.cfg.ID)){state="unmanaged"}
  var players,maxPlayers,mem any
  version:=s.cfg.InstalledVersion
@@ -166,6 +169,7 @@ func (m *manager) describe(s *managedServer)map[string]any{
   "players":players,"maxPlayers":maxPlayers,"tps":nil,"mspt":nil,"cpu":nil,"port":s.cfg.Port,
   "jar":s.cfg.Jar,"version":version,"directory":m.dir(s.cfg.ID),"uptime":uptime,
   "eulaAccepted":s.cfg.EulaAccepted,"autoRestart":s.cfg.AutoRestart,
+  "javaBin":s.cfg.JavaBin,"startCommand":s.cfg.StartCommand,
   "template":s.cfg.Template,"installedVersion":s.cfg.InstalledVersion,
   "rollbackVersion":s.cfg.RollbackVersion,
  }
@@ -221,18 +225,24 @@ func validJar(name string)bool{
 func (m *manager) update(id string,body map[string]json.RawMessage)(map[string]any,error){
  m.mu.Lock();defer m.mu.Unlock()
  s,err:=m.get(id);if err!=nil{return nil,err}
- if err:=m.checkMutationLocked(s,true);err!=nil{return nil,err}
+ // Settings apply on the next start, so they can be edited while running.
+ if err:=m.checkMutationLocked(s,false);err!=nil{return nil,err}
  old:=s.cfg;next:=old
  if v,ok:=body["name"];ok{if json.Unmarshal(v,&next.Name)!=nil||strings.TrimSpace(next.Name)==""||len(next.Name)>64{return nil,apiError{400,"이름이 올바르지 않습니다."}}}
  if v,ok:=body["memoryMb"];ok{if json.Unmarshal(v,&next.MemoryMb)!=nil||next.MemoryMb<512||next.MemoryMb>32768{return nil,apiError{400,"메모리가 올바르지 않습니다."}}}
  if v,ok:=body["jar"];ok{if json.Unmarshal(v,&next.Jar)!=nil||!validJar(next.Jar){return nil,apiError{400,"JAR 이름이 올바르지 않습니다."}}}
  if v,ok:=body["autoRestart"];ok{if json.Unmarshal(v,&next.AutoRestart)!=nil{return nil,apiError{400,"자동 재시작 값이 올바르지 않습니다."}}}
+ if v,ok:=body["javaBin"];ok{if json.Unmarshal(v,&next.JavaBin)!=nil||!validJavaBin(next.JavaBin){return nil,apiError{400,"Java 경로는 존재하는 실행 파일의 절대 경로이거나 비워 두어야 합니다."}}}
+ if v,ok:=body["startCommand"];ok{if json.Unmarshal(v,&next.StartCommand)!=nil||!validStartCommand(next.StartCommand){return nil,apiError{400,"실행 명령어는 2048자 이하 한 줄이어야 합니다."}}}
  if v,ok:=body["eulaAccepted"];ok{if json.Unmarshal(v,&next.EulaAccepted)!=nil{return nil,apiError{400,"EULA 값이 올바르지 않습니다."}}}
  eulaChanged:=old.EulaAccepted!=next.EulaAccepted
  if eulaChanged{
   if err:=os.WriteFile(filepath.Join(m.dir(id),"eula.txt"),[]byte(fmt.Sprintf("eula=%t\n",next.EulaAccepted)),0600);err!=nil{return nil,err}
  }
  s.cfg=next
+ if !next.AutoRestart{
+  if timer:=m.pendingRestarts[id];timer!=nil{timer.Stop();delete(m.pendingRestarts,id)}
+ }
  if err:=m.saveLocked();err!=nil{
   s.cfg=old
   if eulaChanged{_ = os.WriteFile(filepath.Join(m.dir(id),"eula.txt"),[]byte(fmt.Sprintf("eula=%t\n",old.EulaAccepted)),0600)}
@@ -248,12 +258,16 @@ func javaEnv()[]string{
  for _,v:=range os.Environ(){k,_,_:=strings.Cut(v,"=");if keep[k]{env=append(env,v)}}
  return env
 }
+// maxLogEntries bounds the per-server console ring (about 2 MiB worst case).
+const maxLogEntries=1000
 func (m *manager) log(id,level,msg string){
  m.mu.Lock();defer m.mu.Unlock()
  s,ok:=m.servers[id];if !ok{return}
+ // Minecraft prints "Done (12.3s)! For help, type "help"" once it accepts players.
+ if s.process!=nil&&s.process.state=="starting"&&strings.Contains(msg,"Done (")&&strings.Contains(msg,"help"){s.process.state="running"}
  if len(msg)>2048{msg=msg[:2048]}
  e:=logEntry{Time:time.Now().Format("15:04:05"),Level:level,Message:msg}
- if len(s.logs)<400{
+ if len(s.logs)<maxLogEntries{
   s.logs=append(s.logs,e)
  }else{
   // Fixed-capacity ring: one overwrite per log instead of allocating a new
@@ -278,7 +292,8 @@ func (m *manager) subscribe(id string)(<-chan logEntry,func(),error){
  m.mu.Lock();defer m.mu.Unlock()
  s,err:=m.get(id);if err!=nil{return nil,nil,err}
  if len(s.subscribers)>=32{return nil,nil,apiError{429,"로그 구독 한도를 초과했습니다."}}
- ch:=make(chan logEntry,64);s.subscribers[ch]=struct{}{}
+ // Startup bursts print hundreds of lines at once; a small buffer dropped them.
+ ch:=make(chan logEntry,512);s.subscribers[ch]=struct{}{}
  return ch,func(){m.mu.Lock();defer m.mu.Unlock();if _,ok:=s.subscribers[ch];ok{delete(s.subscribers,ch);close(ch)}},nil
 }
 // Keep the reader adapter and exec.Cmd writer on the same bounded parser.
@@ -295,7 +310,7 @@ func (m *manager) start(id string)(map[string]any,error){
  if s.process!=nil||s.busy||m.closing{m.mu.Unlock();return nil,apiError{409,"서버가 실행 중이거나 작업 중입니다."}}
  if timer:=m.pendingRestarts[id];timer!=nil{timer.Stop();delete(m.pendingRestarts,id)}
  if !s.cfg.EulaAccepted{m.mu.Unlock();return nil,apiError{409,"Minecraft EULA 동의가 필요합니다."}}
- if !validJar(s.cfg.Jar){m.mu.Unlock();return nil,apiError{400,"JAR 이름이 올바르지 않습니다."}}
+ if usesJar(s.cfg)&&!validJar(s.cfg.Jar){m.mu.Unlock();return nil,apiError{400,"JAR 이름이 올바르지 않습니다."}}
  folder:=m.dir(id)
  rootInfo,rootErr:=os.Lstat(folder)
  if rootErr!=nil||!rootInfo.IsDir()||rootInfo.Mode()&os.ModeSymlink!=0{
@@ -306,11 +321,12 @@ func (m *manager) start(id string)(map[string]any,error){
  probe,portErr:=net.Listen("tcp",portAddr)
  if portErr!=nil{m.mu.Unlock();return nil,apiError{409,"서버 포트가 이미 사용 중입니다. 기존 Minecraft 프로세스가 실행 중인지 확인하세요."}}
  _=probe.Close()
- jar:=filepath.Join(folder,s.cfg.Jar)
- info,err:=os.Lstat(jar)
- if err!=nil||!info.Mode().IsRegular(){m.mu.Unlock();return nil,apiError{409,"서버 JAR 파일을 업로드하세요."}}
- cmd:=exec.Command(m.javaBin,fmt.Sprintf("-Xms%dM",min(s.cfg.MemoryMb,512)),
-  fmt.Sprintf("-Xmx%dM",s.cfg.MemoryMb),"-jar",s.cfg.Jar,"nogui")
+ if usesJar(s.cfg){
+  info,err:=os.Lstat(filepath.Join(folder,s.cfg.Jar))
+  if err!=nil||!info.Mode().IsRegular(){m.mu.Unlock();return nil,apiError{409,"서버 JAR 파일을 업로드하세요."}}
+ }
+ args:=buildStartArgs(s.cfg,m.javaBin)
+ cmd:=exec.Command(args[0],args[1:]...)
  cmd.Dir=folder;cmd.Env=javaEnv();configureJavaChild(cmd)
  // Use exec.Cmd's built-in copy workers instead of waiting indefinitely
  // for externally inherited stdout/stderr pipes to close.
@@ -333,7 +349,7 @@ func (m *manager) start(id string)(map[string]any,error){
  s.process=p
  result:=m.describe(s)
  m.mu.Unlock()
- m.log(id,"INFO",fmt.Sprintf("Java 시작 PID %d",cmd.Process.Pid))
+ m.log(id,"INFO",fmt.Sprintf("프로세스 시작 PID %d: %s",cmd.Process.Pid,strings.Join(args," ")))
  go func(){
   err:=cmd.Wait()
   stdout.Flush()
@@ -342,7 +358,8 @@ func (m *manager) start(id string)(map[string]any,error){
   _=os.Remove(filepath.Join(folder,".panel-process"))
   m.mu.Lock()
   if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false}
-  restart:=err!=nil&&!p.expectedStop&&s.cfg.AutoRestart&&!m.closing
+  // Any exit the panel did not request (crash or in-game /stop) restarts when enabled.
+  restart:=!p.expectedStop&&s.cfg.AutoRestart&&!m.closing
   m.mu.Unlock()
   if err!=nil{m.log(id,"WARN","Java 종료: "+err.Error())}else{m.log(id,"INFO","Java 정상 종료")}
   close(p.done)
@@ -356,6 +373,10 @@ func (m *manager) command(id,raw string)error{
  if err!=nil{m.mu.Unlock();return err}
  p:=s.process
  if p==nil||p.state=="stopping"{m.mu.Unlock();return apiError{409,"서버가 실행 중이 아닙니다."}}
+ if word:=strings.ToLower(strings.TrimPrefix(strings.TrimSpace(raw),"/"));word=="stop"||word=="end"{
+  // Typed in the panel console: treat like the stop button, no auto restart.
+  p.state="stopping";p.expectedStop=true
+ }
  m.mu.Unlock()
  if !p.stdinMu.TryLock(){return apiError{429,"이전 콘솔 명령을 처리하는 중입니다."}}
  done:=make(chan error,1)
@@ -429,7 +450,7 @@ func (m *manager) scheduleCrashRestart(id string,started time.Time){
   if _,err:=m.start(id);err!=nil{m.log(id,"ERROR","자동 재시작 실패: "+err.Error())}
  })
  m.mu.Unlock()
- m.log(id,"WARN",fmt.Sprintf("비정상 종료: %s 후 자동 재시작 (%d/3)",delay,len(recent)))
+ m.log(id,"WARN",fmt.Sprintf("서버 종료 감지: %s 후 자동 재시작 (%d/3)",delay,len(recent)))
 }
 func (m *manager) shutdown(ctx context.Context)error{
  m.mu.Lock()

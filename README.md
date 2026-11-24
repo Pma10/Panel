@@ -8,7 +8,7 @@
 **가벼운 구성과 간단한 유지보수를 지향하는 Minecraft Java 관리 패널입니다.**
 
 <p>
-  <img src="https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go 1.23 이상" />
+  <img src="https://img.shields.io/badge/Go-1.24%2B-00ADD8?style=flat-square&amp;logo=go&amp;logoColor=white" alt="Go 1.24 이상" />
   <img src="https://img.shields.io/badge/Deploy-Single_binary-243247?style=flat-square" alt="단일 실행 파일" />
   <img src="https://img.shields.io/badge/Database-Not_required-243247?style=flat-square" alt="별도 데이터베이스 불필요" />
   <img src="https://img.shields.io/badge/Status-Development_preview-B5812A?style=flat-square" alt="개발 프리뷰" />
@@ -41,20 +41,21 @@ Panel은 **본인이 신뢰하는 Minecraft 서버들을 한 호스트에서 관
 
 | 기능 | 제공 내용 |
 | :--- | :--- |
-| **서버 제어** | 서버 생성, Java 시작·정지·재시작, 선택적 비정상 종료 후 재시작 |
-| **실시간 콘솔** | stdout/stderr 스트리밍, 수준별 로그 필터, Minecraft 명령 전송 |
+| **서버 제어** | 서버 생성, 시작·정지·재시작, 시작 중/실행 중/종료 중/재시작 대기 상태 표시, 종료 시 자동 재시작 켜기·끄기 |
+| **시작 설정** | 호스트에 설치된 Java 자동 검색·선택, `{java} {memory} {jar} {port}` 자리표시자를 쓰는 실행 명령어 편집 |
+| **실시간 콘솔** | stdout/stderr 스트리밍, 최근 1000줄 스크롤 기록, 수준별 필터, 명령 전송·↑/↓ 명령 기록 |
 | **JAR 설치·업데이트** | Paper/Folia 공식 안정 빌드, SHA-256 검증, 이전 JAR로 롤백. 커스텀 JAR 수동 업로드 |
-| **파일 관리** | 폴더 탐색, 업로드·다운로드, UTF-8 텍스트 편집, 이름 변경·삭제 |
+| **파일 관리** | 서버 실행 중에도 편집·업로드, 더블클릭 열기, 모달 텍스트 편집기(Ctrl+S), 드래그 앤 드롭 업로드·이동, 다중 선택, 폴더 업로드, 단축키 |
 | **백업·예약 작업** | 정지된 서버의 파일 백업·복원·백업 삭제, 한국 시간 기준 예약 백업·재시작 |
 | **상태·진단** | Minecraft 접속 인원·버전, Linux RSS, Go 힙·GC·콘솔 연결 수 |
-| **관리자 보안** | 단일 관리자 세션, Origin/CSRF 검사, 로그아웃 시 콘솔 구독 종료, 감사 기록 |
+| **계정·보안** | 여러 계정(PBKDF2 해시), 계정별 감사 기록, Origin/CSRF 검사, 계정 삭제·비밀번호 변경 시 세션 종료 |
 
 **메모리 사용을 예측 가능하게:** 서버별 최근 로그 400개를 순환 버퍼에 보관하고, 예약 작업은 2개 워커와 제한된 대기열로 처리합니다. 이는 구현상 제한이며 RAM 사용량·처리 속도에 대한 벤치마크 보증은 아닙니다.
 
 <a id="quick-start"></a>
 ## 빠른 시작
 
-**준비물:** Git, Go 1.23 이상, 사용할 Minecraft 버전에 맞는 Java. Go는 소스 빌드에 필요하며, 빌드한 Panel 실행 파일의 운영에는 Node.js가 필요하지 않습니다.
+**준비물:** Git, Go 1.24 이상, 사용할 Minecraft 버전에 맞는 Java. Go는 소스 빌드에 필요하며, 빌드한 Panel 실행 파일의 운영에는 Node.js가 필요하지 않습니다.
 
 ### Linux · Bash 로컬 실행
 
@@ -64,14 +65,12 @@ cd Panel
 
 go build -trimpath -ldflags="-s -w" -o panel .
 
-# 관리자 비밀번호 입력 — 최소 12자, 화면에 표시하지 않습니다.
-read -rsp 'Admin password: ' PANEL_ADMIN_PASSWORD && echo
-export PANEL_ADMIN_PASSWORD
-
 ./panel
 ```
 
-브라우저에서 **http://127.0.0.1:4173**에 접속합니다. 기본 설정에서는 Panel을 실행한 컴퓨터에서만 관리자 화면을 열 수 있습니다.
+브라우저에서 **http://127.0.0.1:4173**에 접속하면 **첫 계정 만들기** 화면이 나옵니다. 아이디와 12자 이상 비밀번호로 계정을 만들고, 이후 계정은 로그인 후 **계정** 메뉴에서 추가·삭제합니다. 기본 설정에서는 Panel을 실행한 컴퓨터에서만 관리자 화면을 열 수 있습니다.
+
+> 다른 컴퓨터에서 접속하는 구성(공개 바인딩·리버스 프록시)에서는 첫 계정 화면을 열어 두지 않도록, 처음 한 번 `PANEL_ADMIN_PASSWORD`를 지정해 `admin` 계정을 만들어야 시작됩니다. 기존 설치도 같은 방식으로 `admin` / 기존 비밀번호로 로그인됩니다.
 
 <details>
 <summary><strong>Windows · PowerShell 실행 방법</strong></summary>
@@ -80,15 +79,10 @@ export PANEL_ADMIN_PASSWORD
 git clone --branch main https://github.com/Pma10/Panel.git
 cd Panel
 go build -o panel.exe .
-
-$password = Read-Host "Admin password (12+ characters)" -AsSecureString
-$env:PANEL_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new("", $password).Password
-Remove-Variable password
-
 .\panel.exe
 ```
 
-비밀번호는 실행 프로세스의 환경 변수로 전달됩니다. 공개 스크립트나 Git에 저장하지 마세요. Windows 대상 교차 컴파일과 Windows 실기기 운영 검증은 서로 다릅니다.
+브라우저에서 첫 계정을 만듭니다. Windows 대상 교차 컴파일과 Windows 실기기 운영 검증은 서로 다릅니다.
 
 </details>
 
@@ -137,12 +131,12 @@ sudo bash scripts/pconnctl-linux.sh rollback
 
 | 환경 변수 | 기본값 | 역할 |
 | :--- | :--- | :--- |
-| `PANEL_ADMIN_PASSWORD` | **필수** | 최소 12자의 관리자 비밀번호 |
+| `PANEL_ADMIN_PASSWORD` | 선택 | 계정이 하나도 없을 때 `admin` 계정을 만들 비밀번호(12자 이상). 외부에서 접속 가능한 구성의 첫 실행에는 필수 |
 | `PANEL_BIND_HOST` | `127.0.0.1` | 관리자 패널 수신 주소 |
 | `PANEL_PORT` | `4173` | 관리자 HTTP 포트 |
 | `PANEL_PUBLIC_ORIGIN` | `http://127.0.0.1:4173` | 실제 관리자 브라우저의 정확한 출처 |
 | `PANEL_DATA_DIR` | `./.panel-data` | 서버·월드·백업·설정·감사 기록 저장 위치 |
-| `PANEL_JAVA_BIN` | `java` | Minecraft 실행용 Java 바이너리 |
+| `PANEL_JAVA_BIN` | `java` | 서버별 Java를 지정하지 않았을 때 쓰는 기본 Java |
 | `GOMEMLIMIT` | 미설정 | Go 런타임의 선택적 소프트 메모리 목표 |
 
 `GOMEMLIMIT`는 JVM 메모리와 별개입니다. Java `-Xmx`도 힙 크기만 제한하며 프로세스 전체 RSS를 강제 제한하지 않습니다.

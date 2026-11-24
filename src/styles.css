@@ -390,3 +390,86 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
   .file-edit-dialog {max-height:91dvh;overflow:auto;}
   .file-editor {min-height:260px;}
 }
+
+/* ---- Compact console ---- */
+.page.console-page { padding: 18px 22px 18px; max-width: none; }
+.console-page .page-heading { margin-bottom: 10px; align-items: center; }
+.console-page .page-heading h1 { font-size: 20px; }
+.console-page .page-heading p { margin-top: 0; font-size: 12px; }
+.console-page .console-toolbar { margin-bottom: 8px; gap: 8px; }
+.console-power { display: inline-flex; align-items: center; gap: 8px; }
+.console-power .btn { min-height: 32px; padding: 0 11px; font-size: 12px; }
+.console-panel { min-height: 320px; height: calc(100dvh - 300px); border-radius: 8px; flex: none; }
+.console-statusbar { height: 30px; min-height: 30px; padding: 0 12px; font-size: 11px; }
+.log-rows { padding: 4px 0 8px; min-width: 0; }
+.log-line, .log-line.warn, .log-line.error { grid-template-columns: 62px 50px minmax(0,1fr); min-height: 0; border-radius: 0; font-size: 12px; }
+.log-line > span { padding: 1px 6px; }
+.log-line > span:first-child { color: #7d8ea4; text-align: left; padding-right: 6px; }
+.log-message { line-height: 1.45; }
+.log-line.warn { background: #26241e; }
+.log-line.error { background: #2f2025; }
+.console-composer { padding: 6px 8px; gap: 8px; }
+.command-field input { height: 34px; border-radius: 6px; padding-left: 30px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+.command-field span { left: 11px; font-size: 16px; }
+.command-send { min-width: 72px; height: 34px; min-height: 34px; }
+.console-help { margin-top: 6px; }
+@media (max-width: 760px) { .console-panel { height: calc(100dvh - 330px); } }
+
+/* ---- Status ---- */
+.status.busy .indicator { animation: status-pulse 1s ease-in-out infinite; }
+@keyframes status-pulse { 50% { opacity: .25; } }
+.status-detail { font-size: 12px; color: var(--secondary); margin-top: 4px; }
+.auto-restart-line { padding: 14px 20px; margin-bottom: 23px; }
+
+/* ---- File manager ---- */
+.file-toolbar { gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.file-search .field { min-height: 32px; width: 190px; }
+.crumb-path { gap: 2px; }
+.crumb-path .crumb { padding: 4px 6px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; }
+.crumb-path .crumb:hover { background: var(--field); text-decoration: none; }
+.crumb-sep { color: var(--muted); }
+.file-card { position: relative; }
+.file-selbar { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.file-selbar .hint { margin: 0; }
+.file-table { min-width: 620px; }
+.file-table th { height: 32px; padding: 0 10px; font-size: 11px; }
+.file-table td { height: auto; padding: 5px 10px; font-size: 13px; }
+.file-table .file-check { width: 34px; padding-right: 0; }
+.file-table .file-check input { margin: 0; vertical-align: middle; accent-color: #2563eb; }
+.file-row { cursor: default; user-select: none; }
+.file-row .file-name { gap: 8px; }
+.file-row .file-name svg { width: 16px; height: 16px; }
+.file-row[data-drop-folder] .file-name svg { color: #d39b2a; }
+.file-row.active, .file-row.active:hover { background: var(--accent-soft); }
+.file-row.drop-target, .crumb.drop-target { outline: 2px dashed #2563eb; outline-offset: -2px; background: var(--accent-soft); }
+.file-up td { color: var(--secondary); }
+.file-empty { text-align: center; color: var(--secondary); padding: 36px 10px !important; }
+.file-row-actions { text-align: right; white-space: nowrap; width: 1%; }
+.mini-btn { border: 1px solid transparent; background: none; color: var(--secondary); font-size: 11px; padding: 2px 7px; border-radius: 5px; visibility: hidden; }
+.file-row:hover .mini-btn, .file-row.active .mini-btn { visibility: visible; }
+.mini-btn:hover { background: var(--paper); border-color: var(--border); color: var(--ink); }
+.mini-btn.danger:hover { color: var(--danger); }
+.drop-hint { display: none; position: absolute; inset: 0; border: 2px dashed #2563eb; border-radius: 12px; background: rgba(37,99,235,.08); color: var(--accent-ink); font-weight: 650; align-items: center; justify-content: center; pointer-events: none; }
+.file-card.dragging .drop-hint { display: flex; }
+@media (hover: none) { .mini-btn { visibility: visible; } }
+
+/* ---- Editor modal ---- */
+.file-edit-dialog { width: min(96vw,1200px); height: min(90dvh,900px); display: flex; flex-direction: column; gap: 10px; padding: 18px; }
+.editor-head { display: flex; align-items: center; gap: 12px; }
+.editor-head h2 { font-size: 14px; overflow-wrap: anywhere; }
+.editor-state { font-size: 11px; color: var(--secondary); background: var(--field); border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
+.editor-state.dirty { color: var(--warn); background: var(--warn-soft); }
+.file-edit-dialog .file-editor { flex: 1; max-height: none; min-height: 0; resize: none; tab-size: 2; white-space: pre; font-size: 12.5px; line-height: 1.5; }
+.file-edit-dialog .modal-actions { align-items: center; }
+.file-edit-dialog .modal-actions .hint { margin: 0; }
+
+/* ---- Startup / Java ---- */
+.settings-card .card-title { padding: 0 0 12px; border-bottom: 0; }
+.java-list { display: grid; gap: 6px; margin-top: 10px; }
+.java-option { display: grid; grid-template-columns: 120px minmax(0,1fr) auto; gap: 10px; align-items: center; text-align: left; border: 1px solid var(--border); background: var(--paper); color: var(--ink); border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+.java-option:hover { background: var(--field); }
+.java-option.active { border-color: #2563eb; background: var(--accent-soft); }
+.java-option span { overflow-wrap: anywhere; color: var(--secondary); }
+.java-option small { color: var(--muted); }
+.command-preview { background: var(--terminal); color: #dfe7f0; border-radius: 8px; padding: 10px 12px; font-size: 12px; overflow-wrap: anywhere; }
+.users-layout { grid-template-columns: minmax(0,1.4fr) minmax(285px,1fr); align-items: start; }

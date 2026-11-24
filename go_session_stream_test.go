@@ -14,12 +14,12 @@ import (
 )
 
 func TestRegressionLoginFailureTrackingHasFiniteCapacity(t *testing.T) {
-	a := newAuthenticator("known-strong-password", "http://panel.test")
+	a := mustAuthenticator("known-strong-password", "http://panel.test")
 	for i := 0; i < 2048; i++ {
 		r := httptest.NewRequest(http.MethodPost, "http://panel.test/api/v1/auth/login", nil)
 		r.RemoteAddr = fmt.Sprintf("10.0.%d.%d:1234", i/256, i%256)
 		r.Header.Set("Origin", "http://panel.test")
-		_, _, err := a.login(r, "incorrect-password")
+		_, _, err := a.login(r, "admin", "incorrect-password")
 		if err == nil {
 			t.Fatal("incorrect password accepted")
 		}
@@ -34,7 +34,7 @@ func TestRegressionLoginFailureTrackingHasFiniteCapacity(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "http://panel.test/api/v1/auth/login", nil)
 	r.RemoteAddr = "192.0.2.8:1234"
 	r.Header.Set("Origin", "http://panel.test")
-	if _, _, err := a.login(r, "known-strong-password"); err != nil {
+	if _, _, err := a.login(r, "admin", "known-strong-password"); err != nil {
 		t.Fatalf("valid login blocked at capacity: %v", err)
 	}
 }
@@ -43,7 +43,8 @@ func TestRegressionConsoleStreamStopsAtLogoutOrExpiry(t *testing.T) {
 	for _, reason := range []string{"logout", "expiry"} {
 		t.Run(reason, func(t *testing.T) {
 			m, id := regressionManager(t)
-			a := newPanelAPI(m, "http://placeholder.test", "known-strong-password")
+			a,apiErr:=newPanelAPI(m, "http://placeholder.test", "known-strong-password")
+ if apiErr!=nil{panic(apiErr)}
 			server := httptest.NewServer(a)
 			a.auth.origin = server.URL
 			t.Cleanup(func() { a.closeStreams(); server.Close() })
@@ -150,10 +151,11 @@ func (w *streamDeadlineWriter) SetWriteDeadline(d time.Time) error {
 
 func TestRegressionConsoleStreamBoundsNetworkWrites(t *testing.T) {
 	m, id := regressionManager(t)
-	a := newPanelAPI(m, "http://panel.test", "known-strong-password")
+	a,apiErr:=newPanelAPI(m, "http://panel.test", "known-strong-password")
+ if apiErr!=nil{panic(apiErr)}
 	login := httptest.NewRequest(http.MethodPost, "http://panel.test/api/v1/auth/login", nil)
 	login.Header.Set("Origin", "http://panel.test")
-	token, _, err := a.auth.login(login, "known-strong-password")
+	token, _, err := a.auth.login(login, "admin", "known-strong-password")
 	if err != nil {
 		t.Fatal(err)
 	}
