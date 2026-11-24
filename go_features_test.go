@@ -148,3 +148,30 @@ func TestStatusTransitionsAndAutoRestartToggle(t *testing.T) {
 		t.Fatalf("turning auto restart off should cancel the pending restart, got %s", got)
 	}
 }
+
+func TestStaticAssetsAreCompressedAndRevalidated(t *testing.T) {
+	_, srv := testPanel(t)
+	get := func(etag string) *http.Response {
+		req, _ := http.NewRequest("GET", srv.URL+"/src/app.js", nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		if etag != "" {
+			req.Header.Set("If-None-Match", etag)
+		}
+		// A bare Transport so Go does not transparently decompress.
+		res, err := (&http.Transport{DisableCompression: true}).RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	first := get("")
+	first.Body.Close()
+	if first.StatusCode != 200 || first.Header.Get("Content-Encoding") != "gzip" || first.Header.Get("ETag") == "" {
+		t.Fatalf("status %d, encoding %q, etag %q", first.StatusCode, first.Header.Get("Content-Encoding"), first.Header.Get("ETag"))
+	}
+	again := get(first.Header.Get("ETag"))
+	again.Body.Close()
+	if again.StatusCode != 304 {
+		t.Fatalf("unchanged asset should be 304, got %d", again.StatusCode)
+	}
+}

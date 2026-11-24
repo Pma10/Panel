@@ -86,22 +86,12 @@ func (a *panelAPI)ServeHTTP(w http.ResponseWriter,r *http.Request){
  if strings.Contains(file,"..") || strings.Contains(file,"\\") {http.NotFound(w,r);return}
  relative:=strings.TrimPrefix(file,"/")
  if path.Clean(relative)!=relative{http.NotFound(w,r);return}
- asset,err:=frontend.Open(relative)
- if err!=nil{http.NotFound(w,r);return}
- defer asset.Close()
- info,err:=asset.Stat()
- if err!=nil||!info.Mode().IsRegular(){http.NotFound(w,r);return}
  // Revalidate every asset: a long cache mixed old JS with a new API after upgrades.
  h.Set("Cache-Control","no-cache")
  contentType:=mime.TypeByExtension(filepath.Ext(relative))
  if contentType==""{contentType="application/octet-stream"}
  h.Set("Content-Type",contentType)
- if seeker,ok:=asset.(io.ReadSeeker);ok{
-  http.ServeContent(w,r,relative,time.Time{},seeker)
- }else{
-  h.Set("Content-Length",fmt.Sprint(info.Size()))
-  if r.Method=="GET"{_,_=io.Copy(w,asset)}
- }
+ if !serveEmbedded(w,r,relative){h.Del("Cache-Control");http.NotFound(w,r)}
 }
 func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
  url:=strings.TrimPrefix(r.URL.Path,"/api/v1/")
