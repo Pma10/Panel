@@ -93,8 +93,8 @@ func run() error {
  if err != nil { return err }
  go manager.resumePending()
  log.Printf("Panel: %s (managed data: %s)", origin, root)
- // Serve may return as soon as Shutdown closes the listener. Do not let
- // main exit while the managed JVMs are still shutting down.
+ // Serve may return as soon as Shutdown closes the listener; wait for the
+ // shutdown goroutine. Managed servers keep running and are reattached later.
  stopCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
  defer stopSignals()
  shutdownComplete := make(chan struct{})

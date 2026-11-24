@@ -12,8 +12,10 @@ EnvironmentFile=/etc/pconn/panel.env
 ExecStart=/opt/pconn/pconn
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=50
-KillMode=control-group
+TimeoutStopSec=15
+# Only the panel stops; Minecraft servers keep running and the next panel
+# reattaches to them. Use the panel (or their console) to stop a server.
+KillMode=process
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

@@ -123,7 +123,7 @@ sudo bash scripts/pconnctl-linux.sh update vX.Y.Z
 sudo bash scripts/pconnctl-linux.sh rollback
 ```
 
-업데이터는 다운로드 체크섬과 바이너리 버전을 확인하고 이전 실행 파일을 보관합니다. 패널 교체 중에는 실행 중인 Minecraft 서버가 잠시 정지할 수 있습니다. 이전 실행 서버의 재시작을 시도하지만, 게임 서버의 준비 완료는 콘솔과 실제 접속으로 확인해야 합니다.
+업데이터는 다운로드 체크섬과 바이너리 버전을 확인하고 이전 실행 파일을 보관합니다. 패널을 교체하거나 재시작해도 실행 중인 Minecraft 서버는 그대로 동작하며, 새 패널이 콘솔·상태를 다시 연결합니다.
 
 **Panel 바이너리 롤백, Minecraft JAR 롤백, 월드 백업 복원은 서로 다른 작업입니다.**
 

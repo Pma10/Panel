@@ -8,7 +8,6 @@ import (
  "errors"
  "fmt"
  "io"
- "log"
  "os"
  "os/exec"
  "net"
@@ -49,9 +48,15 @@ type logEntry struct {
  Message string `json:"message"`
 }
 type managedProcess struct{
- cmd *exec.Cmd
- stdin io.WriteCloser
- done chan struct{}
+ cmd *exec.Cmd // nil when adopted after a panel restart
+ pid int
+ adopted bool
+ stdin io.WriteCloser // nil if console input could not be reattached
+ done chan struct{} // closed after exit handling finished
+ exited chan struct{} // closed as soon as the process is gone
+ tailDone chan struct{}
+ detach chan struct{} // closed when the panel exits and leaves it running
+ detachOnce sync.Once
  state string
  started time.Time
  expectedStop bool
@@ -104,6 +109,7 @@ func newManager(root,javaBin string)(*manager,error){
    m.loadPreviousLog(c.ID)
   }
  }
+ m.adoptRunning()
  go m.scheduleLoop()
  go m.statusLoop()
  go m.scheduledWorker()
@@ -346,44 +352,38 @@ func (m *manager) start(id string)(map[string]any,error){
  }
  args:=buildStartArgs(s.cfg,m.javaBin)
  cmd:=exec.Command(args[0],args[1:]...)
- cmd.Dir=folder;cmd.Env=javaEnv();configureJavaChild(cmd)
- // Use exec.Cmd's built-in copy workers instead of waiting indefinitely
- // for externally inherited stdout/stderr pipes to close.
- stdout:=&boundedConsoleWriter{writeLog:func(line string){m.log(id,"INFO",line)}}
- stderr:=&boundedConsoleWriter{writeLog:func(line string){m.log(id,"WARN",line)}}
- cmd.Stdout=stdout
- cmd.Stderr=stderr
- cmd.WaitDelay=3*time.Second
- stdin,err:=cmd.StdinPipe();if err!=nil{m.mu.Unlock();return nil,err}
- if err:=cmd.Start();err!=nil{m.mu.Unlock();stdin.Close();return nil,apiError{500,"Java 실행 실패: "+err.Error()}}
- if err:=os.WriteFile(filepath.Join(folder,".panel-process"),[]byte(strconv.Itoa(cmd.Process.Pid)+"\n"),0600);err!=nil{
+ cmd.Dir=folder;cmd.Env=javaEnv()
+ // Output goes to a file and stdin to a pipe the child also holds, so the
+ // server survives a panel restart and can be reattached (go_detach.go).
+ consolePath:=filepath.Join(folder,consoleLogFile)
+ output,err:=os.OpenFile(consolePath,os.O_WRONLY|os.O_CREATE|os.O_TRUNC|os.O_APPEND,0600)
+ if err!=nil{m.mu.Unlock();return nil,err}
+ stdinRead,stdinWrite,err:=os.Pipe()
+ if err!=nil{output.Close();m.mu.Unlock();return nil,err}
+ cmd.Stdin=stdinRead;cmd.Stdout=output;cmd.Stderr=output
+ prepareDetached(cmd,stdinWrite)
+ startErr:=cmd.Start()
+ stdinHandle:=afterDetachedStart(stdinWrite)
+ _=stdinRead.Close();_=output.Close()
+ if startErr!=nil{_=stdinWrite.Close();m.mu.Unlock();return nil,apiError{500,"Java 실행 실패: "+startErr.Error()}}
+ pid:=cmd.Process.Pid
+ identity,_:=processIdentity(pid)
+ now:=time.Now()
+ if err:=writeProcessMarker(folder,processMarker{PID:pid,Identity:identity,Stdin:stdinHandle,Started:now.UTC().Format(time.RFC3339)});err!=nil{
   _=cmd.Process.Kill()
-  // Let the internal output writers finish; they also need manager.mu.
   m.mu.Unlock()
   _=cmd.Wait()
-  _=stdin.Close()
+  _=stdinWrite.Close()
   return nil,apiError{500,"Java PID 기록에 실패해 실행을 취소했습니다."}
  }
- p:=&managedProcess{cmd:cmd,stdin:stdin,done:make(chan struct{}),state:"starting",started:time.Now()}
+ p:=newProcess(pid,stdinWrite,"starting",now)
+ p.cmd=cmd
  s.process=p
  result:=m.describe(s)
  m.mu.Unlock()
- m.log(id,"INFO",fmt.Sprintf("프로세스 시작 PID %d: %s",cmd.Process.Pid,strings.Join(args," ")))
- go func(){
-  err:=cmd.Wait()
-  stdout.Flush()
-  stderr.Flush()
-  _=stdin.Close()
-  _=os.Remove(filepath.Join(folder,".panel-process"))
-  m.mu.Lock()
-  if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false;s.cpuValid=false}
-  // Any exit the panel did not request (crash or in-game /stop) restarts when enabled.
-  restart:=!p.expectedStop&&s.cfg.AutoRestart&&!m.closing
-  m.mu.Unlock()
-  if err!=nil{m.log(id,"WARN","Java 종료: "+err.Error())}else{m.log(id,"INFO","Java 정상 종료")}
-  close(p.done)
-  if restart{m.scheduleCrashRestart(id,p.started)}
- }()
+ m.log(id,"INFO",fmt.Sprintf("프로세스 시작 PID %d: %s",pid,strings.Join(args," ")))
+ go m.tailConsole(id,p,consolePath,0)
+ go func(){err:=cmd.Wait();m.processExited(id,p,err,true)}()
  return result,nil
 }
 func (m *manager) command(id,raw string)error{
@@ -397,6 +397,7 @@ func (m *manager) command(id,raw string)error{
   p.state="stopping";p.expectedStop=true
  }
  m.mu.Unlock()
+ if p.stdin==nil{return apiError{409,"이 서버의 콘솔 입력을 다시 연결하지 못했습니다. 서버를 재시작하면 복구됩니다."}}
  if !p.stdinMu.TryLock(){return apiError{429,"이전 콘솔 명령을 처리하는 중입니다."}}
  done:=make(chan error,1)
  go func(){
@@ -423,13 +424,14 @@ func (m *manager) stop(id string)error{
  if p.state=="stopping"{m.mu.Unlock();return nil}
  p.state="stopping";p.expectedStop=true;m.mu.Unlock()
  go func(){
+  if p.stdin==nil{terminate(p.pid);return} // JVM shutdown hooks still save the world on SIGTERM
   p.stdinMu.Lock()
   defer p.stdinMu.Unlock()
   _,_=io.WriteString(p.stdin,"stop\n")
  }()
  go func(){
   select{case <-p.done:return;case <-time.After(25*time.Second):}
-  if p.cmd.Process!=nil{p.cmd.Process.Kill()}
+  killPID(p.pid)
  }()
  return nil
 }
@@ -471,26 +473,23 @@ func (m *manager) scheduleCrashRestart(id string,started time.Time){
  m.mu.Unlock()
  m.log(id,"WARN",fmt.Sprintf("서버 종료 감지: %s 후 자동 재시작 (%d/3)",delay,len(recent)))
 }
+// shutdown leaves running servers alone: the next panel reattaches to them.
 func (m *manager) shutdown(ctx context.Context)error{
  m.mu.Lock()
  if !m.closing{m.closing=true;close(m.stopScheduler)}
  for id,timer:=range m.pendingRestarts{timer.Stop();delete(m.pendingRestarts,id)}
- ids:=[]string{}
- resume:=[]string{}
- for id,s:=range m.servers{
-  if s.process==nil{continue}
-  ids=append(ids,id)
-  // Respect an operator-issued stop already in progress. A panel update
-  // must not bring that server back online.
-  if !s.process.expectedStop && s.process.state!="stopping"{
-   resume=append(resume,id)
+ if !stopServersOnShutdown{
+  for _,s:=range m.servers{
+   if p:=s.process;p!=nil{
+    p.detachOnce.Do(func(){close(p.detach);if p.stdin!=nil{_=p.stdin.Close()}})
+   }
   }
+  m.mu.Unlock()
+  return nil
  }
+ ids:=[]string{}
+ for id,s:=range m.servers{if s.process!=nil{ids=append(ids,id)}}
  m.mu.Unlock()
- if err:=m.saveResumeList(resume);err!=nil{
-  // Never silently claim the running servers can be resumed on the next start.
-  log.Printf("Warning: failed to persist running-server resume state: %v",err)
- }
  for _,id:=range ids{_ = m.stop(id)}
  ticker:=time.NewTicker(100*time.Millisecond);defer ticker.Stop()
  for{
@@ -500,7 +499,7 @@ func (m *manager) shutdown(ctx context.Context)error{
   if active==0{return nil}
   select{case <-ticker.C:case <-ctx.Done():
    m.mu.Lock()
-   for _,s:=range m.servers{if s.process!=nil&&s.process.cmd.Process!=nil{s.process.cmd.Process.Kill()}}
+   for _,s:=range m.servers{if s.process!=nil{killPID(s.process.pid)}}
    m.mu.Unlock()
    return ctx.Err()
   }

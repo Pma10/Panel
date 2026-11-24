@@ -5,7 +5,6 @@ package main
 import (
  "fmt"
  "os"
- "os/exec"
  "path/filepath"
  "syscall"
  "sync"
@@ -23,7 +22,4 @@ func lockPanelData(root string)(func(),error){
  return func(){once.Do(func(){_ = syscall.Flock(int(file.Fd()),syscall.LOCK_UN);_ = file.Close()})},nil
 }
 
-// Signal JVMs when the parent dies unexpectedly and isolate their process group.
-func configureJavaChild(cmd *exec.Cmd){
- cmd.SysProcAttr=&syscall.SysProcAttr{Setpgid:true,Pdeathsig:syscall.SIGTERM}
-}
+

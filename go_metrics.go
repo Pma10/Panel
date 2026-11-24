@@ -89,8 +89,8 @@ func (m *manager)pollStatuses(){
  type item struct{id string;port int;pid int;process *managedProcess}
  current:=[]item{}
  for id,s:=range m.servers{
-  if s.process!=nil&&s.process.cmd.Process!=nil{
-   current=append(current,item{id,s.cfg.Port,s.process.cmd.Process.Pid,s.process})
+  if s.process!=nil&&s.process.pid>0{
+   current=append(current,item{id,s.cfg.Port,s.process.pid,s.process})
   }
  }
  m.mu.Unlock()
