@@ -13,6 +13,7 @@ import (
  "os/exec"
  "net"
  "path/filepath"
+ "regexp"
  "strconv"
  "strings"
  "sync"
@@ -66,6 +67,11 @@ type managedServer struct{
  mcStatus *minecraftStatus
  memoryGB float64
  memoryValid bool
+ cpuPercent float64
+ cpuValid bool
+ cpuProcess *managedProcess
+ cpuLast time.Duration
+ cpuAt time.Time
 }
 type manager struct{
  mu sync.Mutex
@@ -163,10 +169,12 @@ func (m *manager) describe(s *managedServer)map[string]any{
   if s.mcStatus.Version!=""{version=s.mcStatus.Version}
  }
  if s.memoryValid{mem=s.memoryGB}
+ var cpu any
+ if s.cpuValid{cpu=s.cpuPercent}
  return map[string]any{
   "id":s.cfg.ID,"name":s.cfg.Name,"kind":"마인크래프트","status":state,
   "memoryMb":s.cfg.MemoryMb,"memoryLimitGb":float64(s.cfg.MemoryMb)/1024,"memoryGb":mem,
-  "players":players,"maxPlayers":maxPlayers,"tps":nil,"mspt":nil,"cpu":nil,"port":s.cfg.Port,
+  "players":players,"maxPlayers":maxPlayers,"tps":nil,"mspt":nil,"cpu":cpu,"port":s.cfg.Port,
   "jar":s.cfg.Jar,"version":version,"directory":m.dir(s.cfg.ID),"uptime":uptime,
   "eulaAccepted":s.cfg.EulaAccepted,"autoRestart":s.cfg.AutoRestart,
   "javaBin":s.cfg.JavaBin,"startCommand":s.cfg.StartCommand,
@@ -198,19 +206,22 @@ func (m *manager) create(c serverConfig)(map[string]any,error){
  if c.MemoryMb==0{c.MemoryMb=2048}
  if c.MemoryMb<512||c.MemoryMb>32768{return nil,apiError{400,"메모리 범위는 512~32768MiB입니다."}}
  if c.Template==""{c.Template="manual"}
- if c.Template!="manual"&&c.Template!="paper"&&c.Template!="folia"{return nil,apiError{400,"템플릿이 올바르지 않습니다."}}
+ if c.Template!="manual"&&!templateOK(c.Template){return nil,apiError{400,"템플릿이 올바르지 않습니다."}}
  m.mu.Lock();defer m.mu.Unlock()
  if m.closing{return nil,apiError{503,"종료 중입니다."}}
  if len(m.servers)>=100{return nil,apiError{409,"서버 수 제한을 초과했습니다."}}
  for _,s:=range m.servers{if s.cfg.Port==c.Port{return nil,apiError{409,"중복 포트입니다."}}}
  c.ID=makeID();c.Jar="server.jar";c.Schedules=[]schedule{}
  c.InstalledVersion="";c.RollbackVersion="";c.AutoRestart=false
+ // Launch settings are only changed through validated startup updates.
+ c.JavaBin="";c.StartCommand=""
+ if c.Template=="velocity"{c.StartCommand=velocityStartCommand}
  dir:=m.dir(c.ID)
  if err:=os.Mkdir(dir,0700);err!=nil{return nil,err}
  success:=false
  defer func(){if !success{os.RemoveAll(dir)}}()
  if err:=os.WriteFile(filepath.Join(dir,"eula.txt"),[]byte(fmt.Sprintf("eula=%t\n",c.EulaAccepted)),0600);err!=nil{return nil,err}
- if err:=os.WriteFile(filepath.Join(dir,"server.properties"),[]byte(fmt.Sprintf("server-port=%d\nonline-mode=true\nenable-rcon=false\n",c.Port)),0600);err!=nil{return nil,err}
+ if c.Template!="velocity" {if err:=os.WriteFile(filepath.Join(dir,"server.properties"),[]byte(fmt.Sprintf("server-port=%d\nonline-mode=true\nenable-rcon=false\n",c.Port)),0600);err!=nil{return nil,err}}
  s:=&managedServer{cfg:c,subscribers:map[chan logEntry]struct{}{}}
  m.servers[c.ID]=s
  if err:=m.saveLocked();err!=nil{delete(m.servers,c.ID);return nil,err}
@@ -260,11 +271,19 @@ func javaEnv()[]string{
 }
 // maxLogEntries bounds the per-server console ring (about 2 MiB worst case).
 const maxLogEntries=1000
+var ansiPattern=regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+var levelPattern=regexp.MustCompile(`^\[[^\]]*?\b(WARN|ERROR)\]`)
+var donePattern=regexp.MustCompile(`Done \([0-9.,]+m?s\)!`)
 func (m *manager) log(id,level,msg string){
  m.mu.Lock();defer m.mu.Unlock()
  s,ok:=m.servers[id];if !ok{return}
- // Minecraft prints "Done (12.3s)! For help, type "help"" once it accepts players.
- if s.process!=nil&&s.process.state=="starting"&&strings.Contains(msg,"Done (")&&strings.Contains(msg,"help"){s.process.state="running"}
+ plain:=ansiPattern.ReplaceAllString(msg,"")
+ // Paper prints WARN/ERROR lines on stdout; take the level from the line itself.
+ if level=="INFO"{
+  if m:=levelPattern.FindStringSubmatch(plain);m!=nil{level=m[1]}
+ }
+ // Paper/Purpur/Leaf print "Done (12.3s)! For help, type "help"", Velocity "Done (1.23s)!".
+ if s.process!=nil&&s.process.state=="starting"&&donePattern.MatchString(plain){s.process.state="running"}
  if len(msg)>2048{msg=msg[:2048]}
  e:=logEntry{Time:time.Now().Format("15:04:05"),Level:level,Message:msg}
  if len(s.logs)<maxLogEntries{
@@ -357,7 +376,7 @@ func (m *manager) start(id string)(map[string]any,error){
   _=stdin.Close()
   _=os.Remove(filepath.Join(folder,".panel-process"))
   m.mu.Lock()
-  if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false}
+  if s.process==p{s.process=nil;s.mcStatus=nil;s.memoryValid=false;s.cpuValid=false}
   // Any exit the panel did not request (crash or in-game /stop) restarts when enabled.
   restart:=!p.expectedStop&&s.cfg.AutoRestart&&!m.closing
   m.mu.Unlock()

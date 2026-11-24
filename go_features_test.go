@@ -86,7 +86,7 @@ func TestLegacyPasswordBecomesAdminAccount(t *testing.T) {
 func TestBuildStartArgsTemplate(t *testing.T) {
 	cfg := serverConfig{MemoryMb: 4096, Jar: "paper.jar", Port: 25570}
 	got := strings.Join(buildStartArgs(cfg, "java"), "|")
-	if got != "java|-Xms512M|-Xmx4096M|-jar|paper.jar|nogui" {
+	if got != "java|-Xms512M|-Xmx4096M|-Dterminal.jline=false|-Dterminal.ansi=true|-jar|paper.jar|nogui" {
 		t.Fatalf("default command: %s", got)
 	}
 	cfg.JavaBin = `C:\Program Files\Java\jdk-21\bin\java.exe`

@@ -183,7 +183,7 @@ function renderOverview() {
     ["가동 시간",s.uptime,"마지막 시작 이후"]
   ].map(([title,value,note]) => `<div class="card stat-card"><span>${h(title)}</span><strong>${h(value)}</strong><small>${h(note)}</small></div>`).join("");
   const resources = [
-    ["CPU 사용량",s.cpu==null?"측정 불가":Number(s.cpu).toFixed(1)+"%","호스트 프로세서",s.cpu==null?0:s.cpu/100],
+    ["CPU 사용량",s.cpu==null?(s.status==="stopped"?"—":"측정 중"):Number(s.cpu).toFixed(1)+"%","서버 프로세스 · 전체 코어 대비",s.cpu==null?0:s.cpu/100],
     ["메모리 사용량",formatMemory(s.memoryGb)+" / "+s.memoryLimitGb+" GB","할당 메모리 대비 사용량",s.memoryGb==null?0:s.memoryGb/s.memoryLimitGb]
   ].map(([title,value,note,percent],index) => `<div class="card resource-card"><h2>${h(title)}</h2>
     <strong>${h(value)}</strong><p>${h(note)}</p><div class="progress-track"><div class="progress-fill ${index ? "green" : ""}" style="width:${Math.min(100,Math.max(0,percent*100))}%"></div></div></div>`).join("");
@@ -198,13 +198,89 @@ function renderOverview() {
     ${demoNote()}`;
 }
 const emptyServer = () => `<div class="card empty-state">${icon("server","large")}<strong>선택된 서버가 없습니다</strong><p>서버 목록에서 서버를 선택하세요.</p><a class="btn" href="#/servers">서버 목록 열기</a></div>`;
+// Console color: ANSI SGR codes (Paper with -Dterminal.ansi=true) and
+// Minecraft § codes become spans; plain lines get prefix/keyword tints.
+// Only fixed palette entries or validated #rrggbb values reach style="".
+const MC_COLORS = {"0":"#3a3a3a","1":"#4f6bd8","2":"#3fb950","3":"#39c5cf","4":"#e5534b","5":"#c06ff2","6":"#e3b341","7":"#b8c3d1",
+  "8":"#7d8590","9":"#79a8ff","a":"#7ee787","b":"#76e3ea","c":"#ff7b72","d":"#f2a5ff","e":"#f8e36b","f":"#f0f6fc"};
+const ANSI_COLORS = ["#3a3a3a","#e5534b","#3fb950","#e3b341","#4f8ff7","#c06ff2","#39c5cf","#b8c3d1",
+  "#7d8590","#ff7b72","#7ee787","#f8e36b","#79a8ff","#f2a5ff","#76e3ea","#f0f6fc"];
+function styledSpan(text, style) {
+  if (!text) return "";
+  const css = (style.color ? "color:"+style.color+";" : "") + (style.bold ? "font-weight:700;" : "") + (style.italic ? "font-style:italic;" : "");
+  return css ? '<span style="'+css+'">'+h(text)+'</span>' : h(text);
+}
+function applyAnsi(codes, style) {
+  const list = codes === "" ? [0] : codes.split(";").map(Number);
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    if (c === 0) { style.color = ""; style.bold = false; style.italic = false; }
+    else if (c === 1) style.bold = true;
+    else if (c === 3) style.italic = true;
+    else if (c === 22) style.bold = false;
+    else if (c === 23) style.italic = false;
+    else if (c === 39) style.color = "";
+    else if (c >= 30 && c <= 37) style.color = ANSI_COLORS[c-30];
+    else if (c >= 90 && c <= 97) style.color = ANSI_COLORS[c-82];
+    else if (c === 38 && list[i+1] === 5) { const n = list[i+2]; if (n >= 0 && n < 16) style.color = ANSI_COLORS[n]; i += 2; }
+    else if (c === 38 && list[i+1] === 2) {
+      const rgb = list.slice(i+2, i+5);
+      if (rgb.length === 3 && rgb.every((v) => Number.isInteger(v) && v >= 0 && v <= 255))
+        style.color = "#" + rgb.map((v) => v.toString(16).padStart(2,"0")).join("");
+      i += 4;
+    }
+  }
+}
+function renderColored(message) {
+  const style = {color:"",bold:false,italic:false};
+  let out = "", text = "";
+  const flush = () => { out += styledSpan(text, style); text = ""; };
+  for (let i = 0; i < message.length; i++) {
+    const ch = message[i];
+    if (ch === "\x1b" && message[i+1] === "[") {
+      const end = message.slice(i+2).search(/[A-Za-z]/);
+      if (end < 0) break;
+      flush();
+      if (message[i+2+end] === "m") applyAnsi(message.slice(i+2, i+2+end), style);
+      i += 2 + end;
+    } else if (ch === "§" && i+1 < message.length) {
+      const code = message[i+1].toLowerCase();
+      flush();
+      if (code === "x" && /^(§[0-9a-f]){6}$/i.test(message.slice(i+2, i+14))) {
+        style.color = "#" + message.slice(i+2, i+14).replace(/§/g,"").toLowerCase(); i += 13; continue;
+      }
+      if (MC_COLORS[code]) { style.color = MC_COLORS[code]; style.bold = false; style.italic = false; }
+      else if (code === "l") style.bold = true;
+      else if (code === "o") style.italic = true;
+      else if (code === "r") { style.color = ""; style.bold = false; style.italic = false; }
+      i += 1;
+    } else text += ch;
+  }
+  flush();
+  return out;
+}
+const LOG_HIGHLIGHTS = [
+  [/\b(joined the game|logged in with entity id)\b/, "log-join"],
+  [/\b(left the game|lost connection|Disconnected)\b/, "log-leave"],
+  [/\bDone \([0-9.,]+m?s\)!/, "log-done"],
+  [/^\s*(at |Caused by:|\.\.\. \d+ more)/, "log-trace"],
+  [/(Exception|Error:)/, "log-exception"]
+];
+function renderLogMessage(message) {
+  if (/\x1b\[|§/.test(message)) return renderColored(message);
+  // "[12:00:00 INFO]: " or "[Server thread/INFO]: " prefixes are dimmed.
+  const prefix = message.match(/^(\[[^\]]{1,60}\]:?\s*)+/)?.[0] || "";
+  const body = message.slice(prefix.length);
+  const tag = LOG_HIGHLIGHTS.find(([pattern]) => pattern.test(body))?.[1];
+  return (prefix ? '<span class="log-prefix">'+h(prefix)+'</span>' : "") + (tag ? '<span class="'+tag+'">'+h(body)+'</span>' : h(body));
+}
 function renderLogRows() {
   const rows = recentLogs(state.logs,state.query,state.level);
   if (!rows.length) return `<div class="log-empty">조건에 맞는 로그가 없습니다.</div>`;
   return rows.map((row) => `<div class="log-line ${/^(INFO|WARN|ERROR)$/i.test(row.level) ? row.level.toLowerCase() : "other"}" role="row">
     <span class="log-time mono">${h(row.time)}</span>
     <span class="log-level mono">${h(row.level)}</span>
-    <span class="log-message mono">${h(row.message)}</span></div>`).join("");
+    <span class="log-message mono">${renderLogMessage(row.message)}</span></div>`).join("");
 }
 const consoleStatus = () => { const s = server(); return s ? badge(s.status) + powerButtons(s) : ""; };
 function renderConsole() {
@@ -479,7 +555,7 @@ async function refreshRouteData(){
     if(route==="backups")state.backups=Array.isArray(response.backups)?response.backups:[];
     if(route==="startup"){state.startupLive=response;if(state.javaInstalls===null)detectJavaInstalls();}
     if(route==="users")state.users=Array.isArray(response.users)?response.users:[];
-    if(route==="network")state.network=Array.isArray(response.ports)?response.ports:[];
+    if(route==="network")state.network=response;
     if(route==="schedules")state.schedules=Array.isArray(response.schedules)?response.schedules:[];
     if(route==="health")state.health=response;
     if(route==="audit")state.audit=Array.isArray(response.entries)?response.entries:[];
@@ -510,7 +586,7 @@ function renderLiveBackups(){
     '<div class="notice">백업 생성과 복원은 서버가 중지된 상태에서만 가능합니다. 예약 백업은 자동으로 서버를 중지·재시작하므로 접속 중단이 발생할 수 있습니다.</div>';
 }
 function renderJarUpgrade(st){
-  if(!st || !["paper","folia"].includes(st.template))return "";
+  if(!st || !["paper","folia","purpur","leaf","velocity"].includes(st.template))return "";
   const stopped=server()?.status==="stopped";
   const disabled=stopped?"":"disabled";
   return card("공식 서버 JAR 업데이트",
@@ -529,7 +605,7 @@ function renderJarUpgrade(st){
     '<p class="hint">Java 프로세스를 자동으로 재시작하지 않습니다. 월드 호환성을 확인하고 중요한 데이터는 별도 백업하세요.</p>');
 }
 // Mirrors defaultStartCommand and splitCommand in go_java.go.
-const DEFAULT_START_COMMAND = "{java} -Xms512M -Xmx{memory}M -jar {jar} nogui";
+const DEFAULT_START_COMMAND = "{java} -Xms512M -Xmx{memory}M -Dterminal.jline=false -Dterminal.ansi=true -jar {jar} nogui";
 function previewCommand(values){
   const template=String(values.command||"").trim()||DEFAULT_START_COMMAND;
   const java=values.java||"java";
@@ -598,12 +674,44 @@ function renderLiveStartup(){
     '<div class="page-actions"><button class="btn primary" type="submit">시작 설정 저장</button></div></form>'+
     renderJarUpgrade(st);
 }
+const PORT_STATES = {
+  open:["running","열림 · 응답 중"], waiting:["warning","서버 시작 대기"], closed:["stopped","닫힘 (서버 꺼짐)"],
+  occupied:["danger","다른 프로그램이 사용 중"], unknown:["stopped","확인 불가 (UDP)"]
+};
 function renderLiveNetwork(){
-  return header("네트워크","패널이 등록한 Minecraft TCP 포트")+liveViewStatus()+
-  card("포트 할당",'<div class="info-list">'+state.network.map(p=>
-    '<div class="info-line"><div><strong>TCP '+h(p.port)+'</strong><p>'+h(p.description)+'</p></div>'+
-    '<span class="right">설정됨</span></div>').join("")+'</div>')+
-  '<p class="hint">호스트의 실제 방화벽·포트 점유 상태를 자동으로 확인하는 기능은 아직 없습니다.</p>';
+  const net=Array.isArray(state.network)?null:state.network;
+  const s=server();
+  if(!net)return header("네트워크","포트, 접속 주소, 연결 상태")+liveViewStatus();
+  const main=net.ports?.[0];
+  const addresses=(net.addresses||[]).filter(a=>!a.ipv6);
+  const connect=[["127.0.0.1","이 컴퓨터"],...addresses.map(a=>[a.ip,a.kind==="lan"?"같은 네트워크(LAN)":a.kind==="vpn"?"VPN·CGNAT (Tailscale 등)":"공인 IP"])]
+    .map(([ip,label])=>{const value=ip+(main&&main.port!==25565?":"+main.port:"");
+      return '<div class="info-line"><div><strong class="mono">'+h(value)+'</strong><p>'+h(label)+'</p></div>'+
+        button("복사","copy-text","small",'data-text="'+h(value)+'"')+'</div>';}).join("");
+  const rows=(net.ports||[]).map(p=>{const [cls,label]=PORT_STATES[p.state]||PORT_STATES.unknown;
+    return '<tr><td class="mono">'+h(p.port)+'</td><td>'+h(p.protocol)+'</td><td>'+h(p.description)+
+      (p.conflict?'<p class="hint">\''+h(p.conflict)+'\' 서버와 겹침</p>':'')+'</td>'+
+      '<td><span class="status '+cls+'"><i class="indicator"></i>'+h(label)+'</span></td></tr>';}).join("");
+  const st=net.status;
+  const live=st?'<div class="grid-stats net-stats">'+
+      [["응답 시간",st.latencyMs+" ms","로컬 상태 조회"],["접속 인원",st.players+" / "+st.maxPlayers,"현재 플레이어"],
+       ["버전",st.version||"—","서버가 알린 버전"],...(net.onlineMode?[["정품 인증",net.onlineMode==="false"?"꺼짐":"켜짐","online-mode"]]:[])]
+      .map(([t,v,n])=>'<div class="card stat-card"><span>'+h(t)+'</span><strong>'+h(v)+'</strong><small>'+h(n)+'</small></div>').join("")+'</div>':
+    '<div class="notice">'+(net.running?"서버가 아직 상태 조회(핑)에 응답하지 않았습니다. 시작이 끝나면 표시됩니다.":"서버가 꺼져 있어 접속 상태를 확인할 수 없습니다.")+'</div>';
+  return header("네트워크","포트, 접속 주소, 연결 상태",button(icon("refresh","small")+" 새로고침","network-refresh"))+
+    liveViewStatus()+
+    (net.warnings||[]).map(w=>'<div class="notice" role="alert">'+h(w)+'</div>').join("")+
+    live+
+    '<div class="two-col net-layout">'+
+      card("포트",'<div class="table-scroll"><table class="data-table compact-table"><thead><tr><th>포트</th><th>프로토콜</th><th>용도</th><th>상태</th></tr></thead><tbody>'+rows+'</tbody></table></div>')+
+      card("접속 주소",'<div class="info-list">'+connect+'</div>')+
+    '</div>'+
+    '<form class="card settings-card net-port-form" id="port-form"><h2>게임 포트 변경</h2><div class="inline-form">'+
+      '<input class="field" id="new-port" name="port" type="number" min="1024" max="65535" required value="'+h(main?.port||"")+'">'+
+      '<button class="btn primary" type="submit" '+(s?.status==="stopped"?'':'disabled')+'>포트 변경</button></div>'+
+      '<p class="hint">'+(s?.status==="stopped"?'':'서버를 중지해야 변경할 수 있습니다. ')+
+      (s?.template==="velocity"?'Velocity는 실행 명령어의 --port {port} 로 적용됩니다.':'server.properties의 server-port도 함께 바뀝니다.')+
+      ' 외부 접속에는 공유기 포트 포워딩과 방화벽 허용이 필요합니다.</p></form>';
 }
 function renderLiveSchedules(){
   return header("예약 작업","한국 시간 기준 매일 또는 지정 요일에 백업·재시작")+liveViewStatus()+
@@ -629,8 +737,10 @@ function renderLiveHealth(){
     (!status?'<div class="card empty-state">상태 정보를 확인할 수 없습니다.</div>':
       card("실행 상태",'<div class="info-list">'+
         '<div class="info-line"><strong>Java 프로세스</strong><span class="right">'+h(status.status||"unknown")+'</span></div>'+
+        '<div class="info-line"><strong>CPU (전체 코어 대비)</strong><span class="right">'+
+          (status.cpu==null?'측정 중':Number(status.cpu).toFixed(1)+' %')+'</span></div>'+
         '<div class="info-line"><strong>메모리 (RSS)</strong><span class="right">'+
-          (status.memoryGb==null?'측정 불가':h(status.memoryGb)+' GB')+'</span></div>'+
+          (status.memoryGb==null?'측정 중':Number(status.memoryGb).toFixed(2)+' GB')+'</span></div>'+
         '<div class="info-line"><strong>실행 시간</strong><span class="right">'+h(status.uptime||"—")+'</span></div>'+
       '</div>'))+
     '<p class="hint">TPS, MSPT, 플레이어 수는 서버용 데이터 수집 플러그인 또는 별도 API가 연결되어야 실제 측정할 수 있습니다.</p>';
@@ -778,7 +888,7 @@ function renderSettings() {
       button("로그아웃","logout")+'</div></div>')+
     (state.diagnostics?card("Go 패널 메모리·성능 진단",
       '<div class="info-list">'+
-      '<div class="info-line"><strong>실제 Go 프로세스 RSS (Linux)</strong><span class="right">'+
+      '<div class="info-line"><strong>패널 프로세스 메모리 (RSS)</strong><span class="right">'+
         (state.diagnostics.processRSSGb==null?"측정 불가":(Number(state.diagnostics.processRSSGb)*1024).toFixed(1)+" MB")+'</span></div>'+
       '<div class="info-line"><strong>Go 힙 사용량</strong><span class="right">'+fileSize(state.diagnostics.goHeapBytes)+'</span></div>'+
       '<div class="info-line"><strong>Go 런타임 전체 예약</strong><span class="right">'+fileSize(state.diagnostics.goTotalSysBytes)+'</span></div>'+
@@ -858,7 +968,9 @@ function modalBody() {
       <div class="form-group"><label for="new-server-template">서버 템플릿</label>
         <select id="new-server-template" name="server-template" class="select">
           <option value="manual">직접 JAR 업로드 (Leaf · PmaPaper 등)</option>
-          ${state.mode==="live"?'<option value="paper">Paper · 공식 안정 빌드</option><option value="folia">Folia · 공식 안정 빌드</option>':''}
+          ${state.mode==="live"?'<option value="paper">Paper · 공식 안정 빌드</option><option value="purpur">Purpur · 공식 빌드 (MD5 검증)</option>'+
+            '<option value="leaf">Leaf · GitHub 릴리스 (SHA-256 검증)</option><option value="folia">Folia · 공식 안정 빌드</option>'+
+            '<option value="velocity">Velocity · 프록시 (공식 안정 빌드)</option>':''}
         </select></div>
       <div id="new-server-version-group" class="form-group" hidden>
         <label for="new-server-version">Minecraft 버전</label>
@@ -869,7 +981,7 @@ function modalBody() {
       </div>
       <label class="checkbox-label"><input name="eula-accepted" type="checkbox" required>
         <span><a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener noreferrer">Minecraft EULA</a>를 읽고 동의합니다.</span></label>
-      <p class="hint">Paper/Folia는 안정 JAR을 검증해 자동 설치합니다. 기타 서버는 생성 후 파일 화면에서 server.jar을 업로드하세요.</p></div>
+      <p class="hint">Paper·Purpur·Leaf·Folia·Velocity는 공식 배포처에서 받은 JAR을 체크섬으로 검증해 자동 설치합니다. 그 밖의 서버는 생성 후 파일 화면에서 server.jar을 업로드하세요.</p></div>
       <div class="modal-actions" style="margin-top:25px"><button class="btn" type="button" data-action="modal-close">취소</button>
         <button class="btn primary" type="submit">서버 추가</button></div>
     </form></div>`;
@@ -1116,7 +1228,7 @@ function mockActionMessage(action) {
 }
 function exportLogs() {
   const entries = filterLogs(state.logs,state.query,state.level);
-  const rows = entries.map((row) => "["+row.time+" "+row.level+"] "+row.message);
+  const rows = entries.map((row) => "["+row.time+" "+row.level+"] "+row.message.replace(/\x1b\[[0-9;]*[A-Za-z]/g,""));
   downloadText("pconn-"+state.selectedId+"-console.log",rows.join("\n")+"\n");
   toast("표시된 로그를 파일로 내보냈습니다.");
 }
@@ -1634,6 +1746,11 @@ document.addEventListener("click",async(event) => {
     }catch(e){toast(e.message);}
     return;
   }
+  if (action==="network-refresh"){await refreshRouteData();return;}
+  if (action==="copy-text"){
+    try{await navigator.clipboard.writeText(target.dataset.text);toast("복사했습니다: "+target.dataset.text);}catch{toast(target.dataset.text);}
+    return;
+  }
   if (action==="java-detect"){state.javaInstalls=null;await detectJavaInstalls();return;}
   if (action==="java-pick"){
     const input=$("#live-java");if(input){input.value=target.dataset.path;input.dispatchEvent(new Event("input",{bubbles:true}));}
@@ -1688,7 +1805,7 @@ document.addEventListener("click",async(event) => {
   if(action==="jar-versions-load"){
     const template=state.startupLive?.template;
     const select=$("#jar-upgrade-version");
-    if(!select||!["paper","folia"].includes(template))return;
+    if(!select||!["paper","folia","purpur","leaf","velocity"].includes(template))return;
     select.disabled=true;
     select.replaceChildren(new Option("공식 버전 목록 조회 중…",""));
     try{
@@ -1776,12 +1893,12 @@ document.addEventListener("submit",async(event) => {
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
   }
-  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form"].includes(form.id))return;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form","port-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="jar-upgrade-form"){
     const template=state.startupLive?.template;
     const version=String(new FormData(form).get("version")||"");
-    if(!["paper","folia"].includes(template) || !version)return toast("업데이트 버전을 선택하세요.");
+    if(!["paper","folia","purpur","leaf","velocity"].includes(template) || !version)return toast("업데이트 버전을 선택하세요.");
     setModal({kind:"confirm",title:"공식 서버 JAR을 업데이트할까요?",
       description:template+" "+version+" 안정 빌드를 다운로드하고 SHA-256 검증 후 기존 JAR을 교체합니다. 서버 중지가 필요하며 이전 JAR은 롤백용으로 보관합니다.",
       template,version,confirmLabel:"검증 후 업데이트",confirmAction:"jar-upgrade-run"});
@@ -1811,6 +1928,13 @@ document.addEventListener("submit",async(event) => {
       else await apiRequest(fileApi("/rename"),{method:"PATCH",body:{from:relativeFile(state.modal?.name||""),to:relativeFile(name)}});
       setModal(null);state.fileSelection=new Set([name]);await loadFiles();
       if(form.id==="file-create-form")await openTextFile(name);else toast("완료되었습니다.");
+    }catch(e){toast(e.message);}return;
+  }
+  if(form.id==="port-form"){
+    const port=Number(new FormData(form).get("port"));
+    try{
+      await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/network",{method:"PATCH",body:{port}});
+      toast("포트를 "+port+"(으)로 바꿨습니다. 다음 시작부터 적용됩니다.");await pollLiveStatus(true);await refreshRouteData();
     }catch(e){toast(e.message);}return;
   }
   if(form.id==="user-create-form"){

@@ -211,12 +211,15 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
  if rest=="health"{
   if err:=assertMethod(r,"GET");err!=nil{return err}
   value,err:=a.manager.summary(id);if err!=nil{return err}
-  jsonReply(w,200,map[string]any{"id":id,"status":value["status"],"memoryGb":value["memoryGb"],"uptime":value["uptime"]});return nil
+  jsonReply(w,200,map[string]any{"id":id,"status":value["status"],"memoryGb":value["memoryGb"],"cpu":value["cpu"],"uptime":value["uptime"]});return nil
  }
  if rest=="network"{
-  if err:=assertMethod(r,"GET");err!=nil{return err}
-  config,err:=a.manager.startup(id);if err!=nil{return err}
-  jsonReply(w,200,map[string]any{"ports":[]any{map[string]any{"port":config.Port,"protocol":"TCP","description":"Minecraft 접속","status":"allocated"}}});return nil
+  if r.Method=="GET"{info,err:=a.manager.networkInfo(id);if err!=nil{return err};jsonReply(w,200,info);return nil}
+  if err:=assertMethod(r,"PATCH");err!=nil{return err}
+  var body struct{Port int `json:"port"`}
+  if err:=decodeBody(r,&body);err!=nil{return err}
+  result,err:=a.manager.setPort(id,body.Port);if err!=nil{return err}
+  a.audit.append(actor,"PATCH /network",id);jsonReply(w,200,result);return nil
  }
  if rest=="startup"{
   if r.Method=="GET"{config,err:=a.manager.startup(id);if err!=nil{return err};jsonReply(w,200,config);return nil}

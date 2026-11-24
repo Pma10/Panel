@@ -2,10 +2,12 @@ package main
 
 import (
  "context"
+ "crypto/md5"
  "crypto/sha256"
  "encoding/hex"
  "encoding/json"
  "fmt"
+ "hash"
  "io"
  "net/http"
  "net/url"
@@ -19,42 +21,42 @@ import (
 )
 const paperAPI="https://fill.papermc.io"
 const paperDownloadHost="fill-data.papermc.io"
+const purpurAPI="https://api.purpurmc.org"
+const leafReleasesAPI="https://api.github.com/repos/Winds-Studio/Leaf/releases?per_page=100"
 var versionPattern=regexp.MustCompile("^[0-9]+(?:\\.[0-9]+){1,3}(?:-[a-zA-Z0-9._-]+)?$")
 var shaPattern=regexp.MustCompile("^[0-9a-f]{64}$")
+var md5Pattern=regexp.MustCompile("^[0-9a-f]{32}$")
+var buildPattern=regexp.MustCompile("^[0-9]{1,9}$")
 var officialClient=&http.Client{Timeout:3*time.Minute,CheckRedirect:func(_ *http.Request,_ []*http.Request)error{return http.ErrUseLastResponse}}
+// fillProjects are served by PaperMC Fill v3 with SHA-256 checksums.
+var fillProjects=map[string]bool{"paper":true,"folia":true,"velocity":true}
 func templateCatalogue()[]map[string]any{
  return []map[string]any{
   {"id":"manual","name":"직접 JAR 업로드","automatic":false},
   {"id":"paper","name":"Paper","automatic":true},
   {"id":"folia","name":"Folia","automatic":true},
+  {"id":"purpur","name":"Purpur","automatic":true},
+  {"id":"leaf","name":"Leaf","automatic":true},
+  {"id":"velocity","name":"Velocity (프록시)","automatic":true},
  }
 }
-func templateOK(project string)bool{return project=="paper"||project=="folia"}
+func templateOK(project string)bool{return fillProjects[project]||project=="purpur"||project=="leaf"}
+func templateName(project string)string{
+ for _,t:=range templateCatalogue(){if t["id"]==project{return t["name"].(string)}}
+ return project
+}
 func officialGET(ctx context.Context,uri string,limit int64)([]byte,error){
  req,err:=http.NewRequestWithContext(ctx,"GET",uri,nil);if err!=nil{return nil,err}
  req.Header.Set("User-Agent","PConnPanel/0.2 (https://github.com/Pma10/Panel)")
  req.Header.Set("Accept","application/json")
- res,err:=officialClient.Do(req);if err!=nil{return nil,apiError{502,"PaperMC API 연결 실패"}}
+ res,err:=officialClient.Do(req);if err!=nil{return nil,apiError{502,"공식 다운로드 API 연결 실패"}}
  defer res.Body.Close()
- if res.StatusCode!=200{return nil,apiError{502,"PaperMC API 응답 오류"}}
+ if res.StatusCode!=200{return nil,apiError{502,"공식 다운로드 API 응답 오류"}}
  data,err:=io.ReadAll(io.LimitReader(res.Body,limit+1));if err!=nil{return nil,err}
- if int64(len(data))>limit{return nil,apiError{502,"PaperMC 응답 크기 제한 초과"}}
+ if int64(len(data))>limit{return nil,apiError{502,"공식 API 응답 크기 제한 초과"}}
  return data,nil
 }
-func templateVersions(ctx context.Context,project string)([]string,error){
- if !templateOK(project){return nil,apiError{400,"Paper/Folia만 지원합니다."}}
- ctx,cancel:=context.WithTimeout(ctx,20*time.Second);defer cancel()
- data,err:=officialGET(ctx,paperAPI+"/v3/projects/"+project,1<<20)
- if err!=nil{return nil,err}
- var result struct{Versions map[string][]string `json:"versions"`}
- if json.Unmarshal(data,&result)!=nil{return nil,apiError{502,"버전 목록 해석 실패"}}
- versions:=[]string{}
- seen:=map[string]bool{}
- for _,list:=range result.Versions{
-  for _,v:=range list{
-   if !seen[v]&&len(versions)<4096&&len(v)<=48&&versionPattern.MatchString(v){seen[v]=true;versions=append(versions,v)}
-  }
- }
+func sortVersions(versions []string)[]string{
  sort.Slice(versions,func(i,j int)bool{
   left,right:=strings.Split(versions[i],"-")[0],strings.Split(versions[j],"-")[0]
   a,b:=strings.Split(left,"."),strings.Split(right,".")
@@ -67,7 +69,54 @@ func templateVersions(ctx context.Context,project string)([]string,error){
   return versions[i]>versions[j]
  })
  if len(versions)>120{versions=versions[:120]}
- return versions,nil
+ return versions
+}
+type leafRelease struct{
+ Tag string `json:"tag_name"`
+ Draft bool `json:"draft"`
+ Prerelease bool `json:"prerelease"`
+ Assets []struct{
+  Name string `json:"name"`
+  Size int64 `json:"size"`
+  Digest string `json:"digest"`
+  URL string `json:"browser_download_url"`
+ } `json:"assets"`
+}
+func leafReleases(ctx context.Context)([]leafRelease,error){
+ data,err:=officialGET(ctx,leafReleasesAPI,8<<20);if err!=nil{return nil,err}
+ var list []leafRelease
+ if json.Unmarshal(data,&list)!=nil{return nil,apiError{502,"Leaf 릴리스 목록 해석 실패"}}
+ return list,nil
+}
+func templateVersions(ctx context.Context,project string)([]string,error){
+ if !templateOK(project){return nil,apiError{400,"지원하지 않는 서버 종류입니다."}}
+ ctx,cancel:=context.WithTimeout(ctx,20*time.Second);defer cancel()
+ versions:=[]string{}
+ seen:=map[string]bool{}
+ add:=func(v string){
+  // Snapshot proxies have no stable builds; listing them would only fail later.
+  if !seen[v]&&len(versions)<4096&&len(v)<=48&&versionPattern.MatchString(v)&&!strings.Contains(v,"SNAPSHOT"){seen[v]=true;versions=append(versions,v)}
+ }
+ switch{
+ case fillProjects[project]:
+  data,err:=officialGET(ctx,paperAPI+"/v3/projects/"+project,1<<20)
+  if err!=nil{return nil,err}
+  var result struct{Versions map[string][]string `json:"versions"`}
+  if json.Unmarshal(data,&result)!=nil{return nil,apiError{502,"버전 목록 해석 실패"}}
+  for _,list:=range result.Versions{for _,v:=range list{add(v)}}
+ case project=="purpur":
+  data,err:=officialGET(ctx,purpurAPI+"/v2/purpur",1<<20)
+  if err!=nil{return nil,err}
+  var result struct{Versions []string `json:"versions"`}
+  if json.Unmarshal(data,&result)!=nil{return nil,apiError{502,"버전 목록 해석 실패"}}
+  for _,v:=range result.Versions{add(v)}
+ case project=="leaf":
+  list,err:=leafReleases(ctx);if err!=nil{return nil,err}
+  for _,r:=range list{
+   if !r.Draft&&!r.Prerelease&&strings.HasPrefix(r.Tag,"ver-"){add(strings.TrimPrefix(r.Tag,"ver-"))}
+  }
+ }
+ return sortVersions(versions),nil
 }
 type officialBuild struct{
  ID int `json:"id"`
@@ -77,6 +126,68 @@ type officialBuild struct{
   Size int64 `json:"size"`
   Checksums struct{SHA256 string `json:"sha256"`} `json:"checksums"`
  } `json:"downloads"`
+}
+// resolvedJar is what each upstream API yields: where to download and the
+// checksum the bytes must match. Size is 0 when the API does not publish it.
+type resolvedJar struct{
+ URL string
+ Size int64
+ Algorithm string // "sha256" or "md5"
+ Hash string
+ BuildID any
+}
+func resolveJar(ctx context.Context,project,version string)(resolvedJar,error){
+ switch{
+ case fillProjects[project]:
+  uri:=fmt.Sprintf("%s/v3/projects/%s/versions/%s/builds",paperAPI,project,url.PathEscape(version))
+  raw,err:=officialGET(ctx,uri,1<<20);if err!=nil{return resolvedJar{},err}
+  var builds []officialBuild
+  if json.Unmarshal(raw,&builds)!=nil{return resolvedJar{},apiError{502,"빌드 목록을 확인할 수 없습니다."}}
+  var selected *officialBuild
+  for i:=range builds{
+   if builds[i].Channel=="STABLE" && builds[i].Downloads["server:default"].Size>0 &&
+     (selected==nil || builds[i].ID>selected.ID){selected=&builds[i]}
+  }
+  if selected==nil{return resolvedJar{},apiError{404,"선택한 버전에 안정 빌드가 없습니다."}}
+  jar:=selected.Downloads["server:default"]
+  return resolvedJar{URL:jar.URL,Size:jar.Size,Algorithm:"sha256",Hash:strings.ToLower(jar.Checksums.SHA256),BuildID:selected.ID},nil
+ case project=="purpur":
+  raw,err:=officialGET(ctx,purpurAPI+"/v2/purpur/"+url.PathEscape(version)+"/latest",1<<20)
+  if err!=nil{return resolvedJar{},err}
+  var build struct{Build string `json:"build"`;Result string `json:"result"`;MD5 string `json:"md5"`}
+  if json.Unmarshal(raw,&build)!=nil||!buildPattern.MatchString(build.Build){return resolvedJar{},apiError{502,"Purpur 빌드 정보를 확인할 수 없습니다."}}
+  if build.Result!="SUCCESS"{return resolvedJar{},apiError{404,"선택한 버전의 최신 Purpur 빌드가 성공 빌드가 아닙니다."}}
+  return resolvedJar{URL:purpurAPI+"/v2/purpur/"+url.PathEscape(version)+"/"+build.Build+"/download",
+   Algorithm:"md5",Hash:strings.ToLower(build.MD5),BuildID:build.Build},nil
+ case project=="leaf":
+  list,err:=leafReleases(ctx);if err!=nil{return resolvedJar{},err}
+  for _,r:=range list{
+   if r.Tag!="ver-"+version||r.Draft||r.Prerelease{continue}
+   for _,a:=range r.Assets{
+    if strings.HasSuffix(a.Name,".jar")&&strings.HasPrefix(a.Digest,"sha256:"){
+     return resolvedJar{URL:a.URL,Size:a.Size,Algorithm:"sha256",Hash:strings.ToLower(strings.TrimPrefix(a.Digest,"sha256:")),BuildID:a.Name},nil
+    }
+   }
+   return resolvedJar{},apiError{404,"이 Leaf 릴리스에는 SHA-256이 공개된 JAR이 없습니다."}
+  }
+  return resolvedJar{},apiError{404,"선택한 Leaf 버전을 찾을 수 없습니다."}
+ }
+ return resolvedJar{},apiError{400,"지원하지 않는 서버 종류입니다."}
+}
+// downloadAllowed pins each project to its official download host. GitHub
+// release downloads redirect to its asset CDN, which is allowed only there.
+func downloadAllowed(project string,u *url.URL,first bool)bool{
+ if u.Scheme!="https"||u.User!=nil||u.Fragment!=""{return false}
+ switch{
+ case fillProjects[project]:
+  return u.Host==paperDownloadHost&&u.RawQuery==""&&strings.HasPrefix(u.Path,"/v1/objects/")&&strings.HasSuffix(u.Path,".jar")
+ case project=="purpur":
+  return u.Host=="api.purpurmc.org"&&u.RawQuery==""&&strings.HasPrefix(u.Path,"/v2/purpur/")
+ case project=="leaf":
+  if first{return u.Host=="github.com"&&u.RawQuery==""&&strings.HasPrefix(u.Path,"/Winds-Studio/Leaf/releases/download/")}
+  return u.Host=="objects.githubusercontent.com"||u.Host=="release-assets.githubusercontent.com"
+ }
+ return false
 }
 func (m *manager)installTemplate(ctx context.Context,id,project,version string,updating bool)(map[string]any,error){
  if !templateOK(project)||len(version)>48||!versionPattern.MatchString(version){
@@ -101,42 +212,39 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
   if jarErr==nil{return nil,apiError{409,"server.jar 파일이 이미 있습니다. 기존 파일은 덮어쓰지 않습니다."}}
   if !os.IsNotExist(jarErr){return nil,jarErr}
  }
- uri:=fmt.Sprintf("%s/v3/projects/%s/versions/%s/builds",paperAPI,project,url.PathEscape(version))
  ctx,cancel:=context.WithTimeout(ctx,3*time.Minute);defer cancel()
- raw,err:=officialGET(ctx,uri,1<<20);if err!=nil{return nil,err}
- var builds []officialBuild
- if json.Unmarshal(raw,&builds)!=nil{return nil,apiError{502,"빌드 목록을 확인할 수 없습니다."}}
- var selected *officialBuild
- for i:=range builds{
-  if builds[i].Channel=="STABLE" && builds[i].Downloads["server:default"].Size>0 &&
-    (selected==nil || builds[i].ID>selected.ID){selected=&builds[i]}
- }
- if selected==nil{return nil,apiError{404,"선택한 버전에 안정 빌드가 없습니다."}}
- jar,ok:=selected.Downloads["server:default"]
- if !ok || jar.Size<1024 || jar.Size>256<<20 || !shaPattern.MatchString(strings.ToLower(jar.Checksums.SHA256)){
+ jar,err:=resolveJar(ctx,project,version);if err!=nil{return nil,err}
+ validHash:=(jar.Algorithm=="sha256"&&shaPattern.MatchString(jar.Hash))||(jar.Algorithm=="md5"&&md5Pattern.MatchString(jar.Hash))
+ if !validHash||jar.Size<0||jar.Size>256<<20||(jar.Size>0&&jar.Size<1024){
   return nil,apiError{502,"공식 빌드 메타데이터가 올바르지 않습니다."}
  }
  download,err:=url.Parse(jar.URL)
- if err!=nil||download.Scheme!="https"||download.Host!=paperDownloadHost||
-  download.User!=nil||download.RawQuery!=""||download.Fragment!=""||
-  !strings.HasPrefix(download.Path,"/v1/objects/"+strings.ToLower(jar.Checksums.SHA256)+"/")||
-  !strings.HasSuffix(download.Path,".jar"){
-  return nil,apiError{502,"공식 다운로드 주소가 아닙니다."}
+ if err!=nil||!downloadAllowed(project,download,true){return nil,apiError{502,"공식 다운로드 주소가 아닙니다."}}
+ var response *http.Response
+ for hop:=0;;hop++{
+  req,err:=http.NewRequestWithContext(ctx,"GET",download.String(),nil);if err!=nil{return nil,err}
+  req.Header.Set("User-Agent","PConnPanel/0.2 (https://github.com/Pma10/Panel)")
+  response,err=officialClient.Do(req);if err!=nil{return nil,apiError{502,"JAR 다운로드에 실패했습니다."}}
+  if response.StatusCode<300||response.StatusCode>=400{break}
+  location,err:=download.Parse(response.Header.Get("Location"))
+  response.Body.Close()
+  if err!=nil||hop>=4||!downloadAllowed(project,location,false){return nil,apiError{502,"허용되지 않은 다운로드 리디렉션입니다."}}
+  download=location
  }
- req,err:=http.NewRequestWithContext(ctx,"GET",jar.URL,nil);if err!=nil{return nil,err}
- req.Header.Set("User-Agent","PConnPanel/0.2 (https://github.com/Pma10/Panel)")
- response,err:=officialClient.Do(req);if err!=nil{return nil,apiError{502,"JAR 다운로드에 실패했습니다."}}
  defer response.Body.Close()
  if response.StatusCode!=200{return nil,apiError{502,"JAR 응답 오류"}}
  tmp:=filepath.Join(m.dir(id),".panel-"+makeID()+".download")
  out,err:=os.OpenFile(tmp,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600);if err!=nil{return nil,err}
  defer os.Remove(tmp)
- hash:=sha256.New()
- size,copyErr:=io.Copy(io.MultiWriter(out,hash),io.LimitReader(response.Body,jar.Size+1))
+ var digest hash.Hash=sha256.New()
+ if jar.Algorithm=="md5"{digest=md5.New()}
+ limit:=jar.Size
+ if limit==0{limit=256<<20}
+ size,copyErr:=io.Copy(io.MultiWriter(out,digest),io.LimitReader(response.Body,limit+1))
  syncErr:=out.Sync();closeErr:=out.Close()
  if copyErr!=nil{return nil,copyErr};if syncErr!=nil{return nil,syncErr};if closeErr!=nil{return nil,closeErr}
- if size!=jar.Size||hex.EncodeToString(hash.Sum(nil))!=strings.ToLower(jar.Checksums.SHA256){
-  return nil,apiError{502,"다운로드한 JAR의 SHA-256 또는 크기가 일치하지 않습니다."}
+ if size>limit||(jar.Size>0&&size!=jar.Size)||size<1024||hex.EncodeToString(digest.Sum(nil))!=jar.Hash{
+  return nil,apiError{502,"다운로드한 JAR의 체크섬 또는 크기가 일치하지 않습니다."}
  }
  // This mutation happens only after the complete JAR is hash-verified.
  // Keep one previous JAR on disk so an operator can roll back safely.
@@ -190,8 +298,8 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
  if err!=nil{return nil,err}
  if movedOld{_ = os.Remove(oldBackup)}
  verb:="설치";if updating{verb="업데이트"}
- m.log(id,"INFO","공식 "+project+" "+version+" "+verb+" 완료")
- return map[string]any{"project":project,"version":version,"size":size,"sha256":hex.EncodeToString(hash.Sum(nil)),"buildId":selected.ID,"updated":updating},nil
+ m.log(id,"INFO","공식 "+templateName(project)+" "+version+" "+verb+" 완료 ("+jar.Algorithm+" 검증)")
+ return map[string]any{"project":project,"version":version,"size":size,"checksum":jar.Algorithm+":"+jar.Hash,"buildId":jar.BuildID,"updated":updating},nil
 }
 
 /** Switch the verified JAR back to the previous known version; never run while

@@ -17,7 +17,11 @@ import (
 // The line is split on whitespace ("double quotes" group an argument) and
 // placeholders are substituted per argument, so a Java path containing
 // spaces stays one argument. No shell is used.
-const defaultStartCommand = "{java} -Xms512M -Xmx{memory}M -jar {jar} nogui"
+// -Dterminal.ansi=true keeps Paper-based servers printing colors through a pipe.
+const defaultStartCommand = "{java} -Xms512M -Xmx{memory}M -Dterminal.jline=false -Dterminal.ansi=true -jar {jar} nogui"
+
+// Velocity has no "nogui" and takes its listen port from --port.
+const velocityStartCommand = "{java} -Xms512M -Xmx{memory}M -Dterminal.jline=false -Dterminal.ansi=true -jar {jar} --port {port}"
 
 type javaInstall struct {
 	Path    string `json:"path"`

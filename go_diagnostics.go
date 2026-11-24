@@ -23,7 +23,7 @@ func (m *manager) diagnostics()map[string]any{
  }
  m.mu.Unlock()
  var panelRSS any
- if value,ok:=linuxRSS(os.Getpid());ok{panelRSS=value}
+ if value,_,ok:=processUsage(os.Getpid());ok{panelRSS=float64(value)/(1<<30)}
  return map[string]any{
   "processRSSGb":panelRSS,
   "backend":"go",

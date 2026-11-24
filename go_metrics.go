@@ -7,12 +7,10 @@ import (
  "encoding/binary"
  "encoding/json"
  "errors"
- "fmt"
  "io"
  "net"
- "os"
+ "runtime"
  "strconv"
- "strings"
  "sync"
  "time"
 )
@@ -86,20 +84,6 @@ func pingMinecraft(ctx context.Context,port int)(*minecraftStatus,error){
   Version:version,LatencyMs:time.Since(started).Milliseconds(),CheckedAt:time.Now(),
  },nil
 }
-func linuxRSS(pid int)(float64,bool){
- if pid<=0{return 0,false}
- buf,err:=os.ReadFile(fmt.Sprintf("/proc/%d/status",pid))
- if err!=nil{return 0,false}
- for _,line:=range strings.Split(string(buf),"\n"){
-  if strings.HasPrefix(line,"VmRSS:"){
-   fields:=strings.Fields(line)
-   if len(fields)<2{return 0,false}
-   kb,err:=strconv.ParseFloat(fields[1],64)
-   if err==nil{return kb/1048576,true}
-  }
- }
- return 0,false
-}
 func (m *manager)pollStatuses(){
  m.mu.Lock()
  type item struct{id string;port int;pid int;process *managedProcess}
@@ -120,7 +104,8 @@ func (m *manager)pollStatuses(){
    ctx,cancel:=context.WithTimeout(context.Background(),1500*time.Millisecond)
    defer cancel()
    result,err:=pingMinecraft(ctx,x.port)
-   rss,exists:=linuxRSS(x.pid)
+   rss,cpuTime,exists:=processUsage(x.pid)
+   sampled:=time.Now()
    m.mu.Lock()
    if state:=m.servers[x.id];state!=nil&&state.process==x.process {
     if err==nil{
@@ -128,7 +113,13 @@ func (m *manager)pollStatuses(){
      // A successful ping must never undo an operator-requested stop.
      if state.process.state=="starting"{state.process.state="running"}
     }else{state.mcStatus=nil}
-    state.memoryGB=rss;state.memoryValid=exists
+    state.memoryGB=float64(rss)/(1<<30);state.memoryValid=exists
+    // CPU % needs two samples of the same process; 100% means every core busy.
+    if exists&&state.cpuProcess==x.process&&sampled.After(state.cpuAt){
+     state.cpuPercent=100*float64(cpuTime-state.cpuLast)/float64(sampled.Sub(state.cpuAt))/float64(runtime.NumCPU())
+     state.cpuValid=state.cpuPercent>=0
+    }else{state.cpuValid=false}
+    state.cpuProcess,state.cpuLast,state.cpuAt=x.process,cpuTime,sampled
    }
    m.mu.Unlock()
   }(server)
@@ -136,6 +127,6 @@ func (m *manager)pollStatuses(){
  workers.Wait()
 }
 func (m *manager)statusLoop(){
- ticker:=time.NewTicker(15*time.Second);defer ticker.Stop()
+ ticker:=time.NewTicker(5*time.Second);defer ticker.Stop()
  for{select{case <-m.stopScheduler:return;case <-ticker.C:m.pollStatuses()}}
 }

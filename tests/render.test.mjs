@@ -143,3 +143,22 @@ test("invalid log levels and messages never become raw HTML attributes",()=>{
   assert.match(ui.appRoot.innerHTML,/&lt;img src=x onerror=&quot;bad&quot;&gt;/);
   assert.doesNotMatch(ui.appRoot.innerHTML,/class="log-line error" autofocus/);
 });
+
+test("console colors ANSI and § codes without letting them inject markup",()=>{
+  const ui=harness();
+  ui.state.logs=[];
+  appendBoundedLog(ui.state.logs,{time:"22:00:00",level:"INFO",message:"\x1b[33m[22:00:00 WARN]: \x1b[38;2;255;0;0mhot\x1b[0m <b>x</b>"});
+  appendBoundedLog(ui.state.logs,{time:"22:00:01",level:"INFO",message:"§aGreen §x§1§2§3§4§5§6hex §lbold"});
+  appendBoundedLog(ui.state.logs,{time:"22:00:02",level:"INFO",message:"[Server thread/INFO]: Steve joined the game"});
+  appendBoundedLog(ui.state.logs,{time:"22:00:03",level:"INFO",message:'\x1b[38;2;1;2;"onmouseover=alert(1)m bad'});
+  ui.state.route="console";
+  ui.render();
+  const html=ui.appRoot.innerHTML;
+  assert.match(html,/color:#ff0000;">hot<\/span>/);
+  assert.match(html,/&lt;b&gt;x&lt;\/b&gt;/);
+  assert.match(html,/color:#7ee787;">Green /);
+  assert.match(html,/color:#123456;">hex /);
+  assert.match(html,/font-weight:700;">bold/);
+  assert.match(html,/<span class="log-prefix">\[Server thread\/INFO\]: <\/span><span class="log-join">Steve joined the game<\/span>/);
+  assert.doesNotMatch(html,/onmouseover=alert/);
+});
