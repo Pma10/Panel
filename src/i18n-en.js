@@ -168,6 +168,12 @@ export const EN = {
   "공식 JAR 설치가 완료되었습니다. 이제 서버를 시작할 수 있습니다.": "Installed. You can start the server now.",
   "서버가 생성됐습니다. server.jar을 직접 업로드하세요.": "Server created. Upload server.jar next.",
 
+  // Activity / audit labels
+  "시작 설정 변경": "Startup settings changed", "서버 생성": "Server created", "콘솔 명령": "Console command",
+  "파일 삭제": "File deleted", "폴더 생성": "Folder created", "백업 복원": "Backup restored", "JAR 설치": "JAR installed",
+  "JAR 업데이트": "JAR updated", "예약 추가": "Schedule added", "예약 삭제": "Schedule deleted", "첫 계정 생성": "First account created",
+  "계정 생성": "Account created", "전체 보기 →": "View all →",
+
   // Server error messages (Go backend)
   "비밀번호는 12자 이상이어야 합니다.": "Passwords must be at least 12 characters.", "비밀번호가 너무 깁니다.": "The password is too long.",
   "아이디는 3~32자의 영문, 숫자, _ - . 만 사용할 수 있습니다.": "Usernames are 3–32 letters, digits, _ - or .",

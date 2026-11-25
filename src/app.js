@@ -99,11 +99,11 @@ function renderSidebar() {
 function renderChrome() {
   return `<div class="mobile-overlay ${state.mobileMenu ? "open" : ""}" data-action="close-menu"></div>
     <header class="mobile-top"><button class="icon-button" data-action="open-menu" aria-label="메뉴 열기">${icon("menu")}</button>
-      <a class="brand" href="#/dashboard">Panel</a><span class="demo-ribbon">${state.mode === "demo" ? "예시 모드" : "API 연결"}</span></header>
+      <a class="brand" href="#/dashboard">Panel</a>${state.mode === "demo" ? '<span class="demo-ribbon">예시 모드</span>' : ""}</header>
     <header class="topbar"><div class="crumbs"><a href="#/dashboard">Panel</a><span>/</span><span class="current">${h(routeTitle())}</span></div>
-      <div class="top-actions"><span class="demo-ribbon">${state.mode === "demo" ? "예시 데이터" : "실제 API"}</span>
+      <div class="top-actions">${state.mode === "demo" ? '<span class="demo-ribbon">예시 데이터</span>' : ""}
       <button class="global-search" data-action="palette" aria-label="기능 검색">${icon("search", "small")}<span>기능 검색</span><kbd class="keycap">⌘ K</kbd></button>
-      <button class="icon-button" data-action="show-notifications" aria-label="알림">${icon("bell")}</button><span class="top-avatar" title="${state.mode==="demo"?"예시 계정":"연결된 계정"}">P</span></div>
+      ${state.mode === "demo" ? `<button class="icon-button" data-action="show-notifications" aria-label="알림">${icon("bell")}</button>` : ""}<span class="top-avatar" title="${h(state.mode==="demo"?"Pma":state.username)}">${h((state.mode==="demo"?"P":state.username||"?").slice(0,1).toUpperCase())}</span></div>
     </header>
     <nav class="mobile-tabbar" aria-label="모바일 주요 탐색">
       ${[["dashboard","대시보드","grid"],["servers","서버","server"],["console","콘솔","terminal"],["settings","설정","gear"]].map(([route,title,glyph]) =>
@@ -122,15 +122,35 @@ function renderServerRows(servers) {
     <td class="numeric">${fmtPlayers(s)}</td><td class="numeric">${formatMemory(s.memoryGb)}</td>
     </tr>`).join("");
 }
+// Audit actions as people read them ("POST /actions/start" -> "서버 시작").
+const AUDIT_LABELS = {
+  "POST /actions/start":"서버 시작", "POST /actions/stop":"서버 중지", "POST /actions/restart":"재시작",
+  "PATCH /startup":"시작 설정 변경", "POST /servers":"서버 생성", "POST /commands":"콘솔 명령",
+  "PUT /files/upload":"파일 업로드", "DELETE /files":"파일 삭제", "POST /files/mkdir":"폴더 생성", "PATCH /files/rename":"이름 변경",
+  "POST /backups":"백업 생성", "DELETE /backups":"백업 삭제", "POST /backups/restore":"백업 복원",
+  "POST /install":"JAR 설치", "POST /install/upgrade":"JAR 업데이트", "POST /install/rollback":"JAR 롤백",
+  "POST /schedules":"예약 추가", "DELETE /schedules":"예약 삭제", "PATCH /network":"포트 변경",
+  "POST /auth/setup":"첫 계정 생성", "POST /auth/password":"비밀번호 변경"
+};
+const auditLabel = (action) => AUDIT_LABELS[action] || (/^POST \/users /.test(action) ? "계정 생성" : /^DELETE \/users /.test(action) ? "계정 삭제" : action);
+const serverNameOf = (id) => state.servers.find((x) => x.id === id)?.name || "";
+function liveActivity() {
+  return (state.audit || []).slice(0, 6).map((x) => ({
+    type: /start|install|backups$|setup/.test(x.action) ? "ok" : "",
+    title: auditLabel(x.action),
+    detail: [serverNameOf(x.serverId), x.actor].filter(Boolean).join(" · "),
+    time: new Date(x.time).toLocaleTimeString(uiLocale(), { hour: "2-digit", minute: "2-digit" })
+  }));
+}
 function renderDashboard() {
   const sum = serverSummary(state.servers);
-  const activities = (state.mode === "demo" ? state.activity : []).map((a) => `<div class="activity-row"><div class="activity-spot ${a.type === "ok" ? "ok" : ""}">${icon(a.type === "ok" ? "check" : "clock","small")}</div>
+  const activities = (state.mode === "demo" ? state.activity : liveActivity()).map((a) => `<div class="activity-row"><div class="activity-spot ${a.type === "ok" ? "ok" : ""}">${icon(a.type === "ok" ? "check" : "clock","small")}</div>
      <div class="activity-info"><strong>${h(a.title)}</strong><small>${h(a.detail)}</small></div><time>${h(a.time)}</time></div>`).join("");
   return `${header("대시보드","서버 상태와 최근 작업",button(`${icon("plus","small")} 서버 추가`,"server-create","primary"))}
     <section class="card summary-strip" aria-label="운영 현황">
       <div class="summary-primary"><strong><i class="indicator" style="color:var(--success)"></i>${sum.running}대 서버가 실행 중</strong>
         <small>전체 ${sum.total}대 중 중지 ${sum.total-sum.running}대 · 서버 상태 확인</small>
-        <span class="fine-print">최근 확인 · ${state.mode === "demo" ? "예시 데이터" : "연결된 API"}</span></div>
+</div>
       <div class="summary-secondary"><span>현재 접속 인원</span><strong>${state.mode==="live" && !state.servers.some(x=>x.players!=null)?"측정 중":sum.players+"명"}</strong></div>
       <div class="summary-secondary"><span>전체 메모리 사용량</span><strong>${state.mode==="live" && !state.servers.some(x=>x.memoryGb!=null)?"측정 불가":sum.memoryGb.toFixed(1)+" GB"}</strong></div>
     </section>
@@ -138,7 +158,7 @@ function renderDashboard() {
       ${card("내 서버",`<div class="table-scroll"><table class="data-table">
         <thead><tr><th>서버 이름</th><th>상태</th><th class="numeric">플레이어</th><th class="numeric">메모리</th></tr></thead>
         <tbody>${renderServerRows(state.servers.slice(0,8))}</tbody></table></div>`,`<a href="#/servers">전체 서버 보기 →</a>`)}
-      ${card("최근 활동",`<div class="activity-list">${activities || '<div class="empty-state"><strong>활동 내역 API 미연결</strong><p>실제 서버 활동 기록을 불러올 수 없습니다.</p></div>'}</div>`,state.mode==="demo"?`<a href="#/audit">전체 보기</a>`:"")}
+      ${card("최근 활동",`<div class="activity-list">${activities || '<div class="empty-state"><strong>아직 기록된 작업이 없습니다.</strong></div>'}</div>`,`<a href="#/audit">전체 보기 →</a>`)}
     </div>${demoNote()}`;
 }
 function renderServers() {
@@ -540,15 +560,15 @@ function renderFiles() {
 
 async function refreshRouteData(){
   if(state.mode!=="live" || !state.authenticated)return;
-  if(!state.selectedId && !["audit","settings","users"].includes(state.route))return;
+  if(!state.selectedId && !["audit","settings","users","dashboard"].includes(state.route))return;
   if(state.route==="files"){await loadFiles();return;}
   const route=state.route;
-  const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit",settings:"diagnostics",users:"users"};
+  const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit",settings:"diagnostics",users:"users",dashboard:"audit"};
   if(!endpoints[route])return;
   const id=state.selectedId,seq=++state.viewRequest;
   state.viewError="";state.viewLoading=true;render();
   try{
-    const path=route==="audit"?"/audit":route==="settings"?"/diagnostics":route==="users"?"/users":"/servers/"+encodeURIComponent(id)+"/"+endpoints[route];
+    const path=route==="audit"||route==="dashboard"?"/audit":route==="settings"?"/diagnostics":route==="users"?"/users":"/servers/"+encodeURIComponent(id)+"/"+endpoints[route];
     const response=await apiRequest(path);
     if(seq!==state.viewRequest || id!==state.selectedId || route!==state.route)return;
     if(route==="backups")state.backups=Array.isArray(response.backups)?response.backups:[];
@@ -557,7 +577,7 @@ async function refreshRouteData(){
     if(route==="network")state.network=response;
     if(route==="schedules")state.schedules=Array.isArray(response.schedules)?response.schedules:[];
     if(route==="health")state.health=response;
-    if(route==="audit")state.audit=Array.isArray(response.entries)?response.entries:[];
+    if(route==="audit"||route==="dashboard")state.audit=Array.isArray(response.entries)?response.entries:[];
     if(route==="settings")state.diagnostics=response;
   }catch(e){if(seq===state.viewRequest)state.viewError=e.message;}
   finally{if(seq===state.viewRequest){state.viewLoading=false;if(route===state.route)render();}}
@@ -771,7 +791,7 @@ function renderLiveAudit(){
   const entries=state.audit||[];
   return header("감사 로그","실제 관리자 작업 기록")+liveViewStatus()+
   card("최근 작업",'<div class="table-scroll"><table class="data-table"><thead><tr><th>시각</th><th>작업</th><th>대상</th></tr></thead><tbody>'+
-    (entries.map(x=>'<tr><td>'+h(new Date(x.time).toLocaleString(uiLocale()))+'</td><td>'+h(x.action)+'</td>'+
+    (entries.map(x=>'<tr><td>'+h(new Date(x.time).toLocaleString(uiLocale()))+'</td><td>'+h(auditLabel(x.action))+'</td>'+
       '<td>'+h(x.serverId||"패널")+'</td></tr>').join("")||
       '<tr><td colspan="3" class="empty-state">아직 기록된 작업이 없습니다.</td></tr>')+
     '</tbody></table></div>');
@@ -1100,7 +1120,7 @@ function loadMonaco() {
   return monacoPromise;
 }
 const EDITOR_LANGUAGES = {
-  yml:"yaml", yaml:"yaml", json:"json", json5:"json", mcmeta:"json", properties:"ini", ini:"ini", cfg:"ini", conf:"ini", toml:"ini",
+  yml:"yaml", yaml:"yaml", json:"json", json5:"json", mcmeta:"json", properties:"properties", ini:"ini", cfg:"ini", conf:"ini", toml:"ini",
   js:"javascript", mjs:"javascript", ts:"typescript", sh:"shell", bash:"shell", bat:"bat", cmd:"bat", ps1:"powershell",
   xml:"xml", html:"html", css:"css", md:"markdown", py:"python", java:"java", kt:"kotlin", lua:"lua", sql:"sql"
 };
@@ -1116,6 +1136,13 @@ async function mountEditor() {
   if (state.modal !== modal || !host || !area) return;
   disposeEditor();
   host.hidden = false; area.hidden = true;
+  if (!monaco.languages.getLanguages().some((l) => l.id === "properties")) {
+    monaco.languages.register({ id: "properties" });
+    monaco.languages.setMonarchTokensProvider("properties", { tokenizer: { root: [
+      [/^\s*[#!].*$/, "comment"], [/^([^=:\s][^=:]*?)(\s*[=:])/, ["attribute.name", "delimiter"]],
+      [/\b(true|false)\b/, "keyword"], [/\b\d+(\.\d+)?\b/, "number"]
+    ] } });
+  }
   activeEditor = monaco.editor.create(host, {
     value: area.value, language: editorLanguage(modal.path), theme: state.theme === "dark" ? "vs-dark" : "vs",
     automaticLayout: true, fontSize: 13, tabSize: 2, insertSpaces: true, scrollBeyondLastLine: false,

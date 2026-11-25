@@ -15,12 +15,10 @@ git clone --branch main https://github.com/Pma10/Panel.git
 cd Panel
 go build -trimpath -ldflags="-s -w" -o pconn .
 
-read -rsp 'Admin password (12+ chars): ' PANEL_ADMIN_PASSWORD && echo
-export PANEL_ADMIN_PASSWORD
 ./pconn
 ```
 
-Windows는 `go build -o pconn.exe .`와 PowerShell 환경 변수 설정을 사용합니다. 비밀번호 입력을 숨기는 예제는 [시작 가이드](getting-started.md)에 있습니다. 접속 주소는 `http://127.0.0.1:4173`입니다.
+Windows는 `go build -o pconn.exe .`로 빌드합니다. 접속 주소는 `http://127.0.0.1:4173`이며 처음 접속하면 첫 계정을 만듭니다.
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -63,4 +61,4 @@ go test -race -count=1 ./...
 go build -trimpath -o pconn .
 ```
 
-백엔드의 로컬 검사 결과와 제외 항목은 [2026-11-16 검증 보고서](verification-2026-11-16.md)에 있습니다. **백엔드 검사 성공, 전체 저장소 CI 통과, 실제 서버 운영 검증은 서로 다릅니다.** GitHub Actions 실패 원인은 반환된 실행 단계 정보만으로 확정하지 못했습니다. 주요 서버를 전환하기 전에 전체 소스와 웹 자산을 포함한 검사, 실제 JAR 실행, 백업·복원과 운영 환경을 별도로 확인하세요.
+주요 서버를 전환하기 전에 테스트 서버에서 실제 JAR 실행, 백업·복원과 운영 환경을 먼저 확인하세요.

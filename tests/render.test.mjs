@@ -122,10 +122,12 @@ test("live mode does not present fixture health, backups, or audit records as re
   const ui=harness({live:true});
   ui.state.loading=false;
   ui.state.mode="live";
+  const fixtureText=[fixtures.DEMO_BACKUPS[0].title,fixtures.DEMO_AUDIT[1].actor,fixtures.DEMO_AUDIT[0].target,"예시 데이터","디자인 검토용"];
   for (const route of ["health","backups","audit","files","network","startup","schedules","users"]) {
     ui.state.route=route;
     ui.render();
-    assert.match(ui.appRoot.innerHTML,/실제 데이터 API가 연결되지 않았습니다/);
+    const page=ui.appRoot.innerHTML.split("<main")[1]||"";
+    for (const text of fixtureText) assert.ok(!page.includes(text),route+" shows demo text: "+text);
   }
   ui.state.route="health";
   ui.render();

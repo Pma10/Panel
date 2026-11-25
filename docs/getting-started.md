@@ -2,7 +2,7 @@
 
 [← README](../README.md) · [운영 및 배포](go-backend.md) · [구조 및 유지보수](architecture.md)
 
-Panel을 **테스트용 Minecraft Java 서버**에서 처음 사용하는 절차입니다. 현재 프로젝트는 **개발 Preview**입니다. 백엔드 로컬 검사의 범위와 결과는 [검증 보고서](verification-2026-11-16.md)에 있으며, 전체 UI와 실제 Minecraft 서버의 장기 운영 검증을 대신하지 않습니다. 중요한 월드는 외부에도 백업하고 별도 테스트 환경에서 먼저 확인하세요.
+Panel을 **테스트용 Minecraft Java 서버**에서 처음 사용하는 절차입니다. 현재 프로젝트는 **개발 Preview**입니다. 중요한 월드는 외부에도 백업하고 별도 테스트 환경에서 먼저 확인하세요.
 
 ## 1. 시작 전 확인
 
@@ -29,10 +29,6 @@ go vet ./...
 go test -count=1 ./...
 
 go build -trimpath -o panel .
-
-read -rsp 'Admin password (12+ chars): ' PANEL_ADMIN_PASSWORD && echo
-export PANEL_ADMIN_PASSWORD
-
 ./panel
 ```
 
@@ -50,22 +46,19 @@ go version
 java -version
 
 go build -o panel.exe .
-$password = Read-Host "Admin password (12+ characters)" -AsSecureString
-$env:PANEL_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new("", $password).Password
-Remove-Variable password
 .\panel.exe
 ```
 
-비밀번호는 프로세스 환경 변수로 전달됩니다. 공개 스크립트나 Git에 저장하지 마세요. Panel을 실행한 컴퓨터에서 브라우저를 열어 같은 주소로 접속합니다.
+Panel을 실행한 컴퓨터에서 브라우저로 같은 주소에 접속합니다. 처음 접속하면 **첫 계정 만들기** 화면이 나옵니다.
 
 ## 2. 첫 서버 등록과 실행
 
-1. 관리자 비밀번호로 로그인합니다.
+1. 첫 계정을 만들거나 로그인합니다. 다른 계정은 **계정** 메뉴에서 추가합니다.
 2. **서버 생성**을 열고 이름, 서버 접속 포트, Java 메모리(MiB)를 지정합니다. 포트는 다른 서버와 중복되면 안 됩니다.
 3. [Minecraft EULA](https://aka.ms/MinecraftEULA)를 읽고 동의합니다. 패널이 설정한 `eula.txt`와 `server.properties`는 서버의 작업 폴더에 저장됩니다.
 4. 설치 방법을 선택합니다.
-   - **Paper/Folia**: 공식 안정 빌드의 Minecraft 버전을 선택하고 서버 JAR 다운로드·검증을 진행합니다. 사용하는 플러그인의 호환성도 확인하세요.
-   - **Leaf/PmaPaper/기타 JAR**: 서버를 만든 뒤 **파일** 화면에서 신뢰하는 파일을 `server.jar` 이름으로 업로드합니다.
+   - **Paper · Purpur · Leaf · Folia · Velocity**: Minecraft 버전을 고르면 공식 배포처에서 JAR을 받아 체크섬을 확인한 뒤 설치합니다. 사용하는 플러그인의 호환성도 확인하세요.
+   - **그 밖의 JAR**: 서버를 만든 뒤 **파일** 화면에서 신뢰하는 파일을 `server.jar` 이름으로 업로드합니다 (끌어다 놓기 가능).
 5. **서버 시작**을 누른 다음 **콘솔**에서 구동 완료 메시지를 확인합니다.
 6. Minecraft 클라이언트에서 서버 IP와 지정한 게임 포트로 접속합니다.
 
@@ -151,7 +144,7 @@ Leaf, PmaPaper 등 수동 업로드 JAR에는 공식 자동 업데이트가 적�
 | Paper/Folia 자동 설치 실패 | 공식 안정 빌드 제공 여부, 외부 네트워크 및 API 응답 |
 | 패널 재시작 후 서버 접속 불가 | 서버 상태/콘솔을 확인. 자동 복구는 서버 준비 완료를 보장하지 않음 |
 
-문제를 보고할 때 **`go vet ./...` 및 `go test -count=1 ./...`의 결과**와 실행 환경을 함께 남겨 주세요. 로컬 백엔드 검사, GitHub CI, 실제 Minecraft 서버 검증의 범위는 [검증 보고서](verification-2026-11-16.md)에서 구분합니다.
+문제를 보고할 때 **`go vet ./...` 및 `go test -count=1 ./...`의 결과**와 운영체제·Java 버전을 함께 남겨 주세요.
 
 ---
 

@@ -526,3 +526,4 @@ button, a, input, select, textarea { transition: color .14s ease, background-col
 @media (prefers-reduced-motion: reduce) {
   .route-enter > *, .modal-scrim, .modal-scrim > .modal, .toast { animation: none; }
 }
+.field.mono::placeholder, .command-field input::placeholder { font-family: "Paperlogy", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }

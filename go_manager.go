@@ -178,7 +178,7 @@ func (m *manager) describe(s *managedServer)map[string]any{
  var cpu any
  if s.cpuValid{cpu=s.cpuPercent}
  return map[string]any{
-  "id":s.cfg.ID,"name":s.cfg.Name,"kind":"마인크래프트","status":state,
+  "id":s.cfg.ID,"name":s.cfg.Name,"kind":serverKind(s.cfg),"status":state,
   "memoryMb":s.cfg.MemoryMb,"memoryLimitGb":float64(s.cfg.MemoryMb)/1024,"memoryGb":mem,
   "players":players,"maxPlayers":maxPlayers,"tps":nil,"mspt":nil,"cpu":cpu,"port":s.cfg.Port,
   "jar":s.cfg.Jar,"version":version,"directory":m.dir(s.cfg.ID),"uptime":uptime,
@@ -187,6 +187,13 @@ func (m *manager) describe(s *managedServer)map[string]any{
   "template":s.cfg.Template,"installedVersion":s.cfg.InstalledVersion,
   "rollbackVersion":s.cfg.RollbackVersion,
  }
+}
+// serverKind is the label under a server name, e.g. "Purpur 1.21.4".
+func serverKind(c serverConfig)string{
+ kind:=map[string]string{"paper":"Paper","folia":"Folia","purpur":"Purpur","leaf":"Leaf","velocity":"Velocity"}[c.Template]
+ if kind==""{return "Minecraft"}
+ if c.InstalledVersion!=""{kind+=" "+c.InstalledVersion}
+ return kind
 }
 func (m *manager) list()[]map[string]any{
  m.mu.Lock();defer m.mu.Unlock()

@@ -8,3 +8,9 @@ dist/
 
 # Managed server worlds, admin sessions and backup snapshots
 .panel-data/
+
+# Built binaries and test builds
+/panel
+/pconn
+*.exe
+*.test

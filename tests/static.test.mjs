@@ -18,7 +18,8 @@ test("static server streams public files and never exposes repository secrets", 
   await writeFile(join(root,".env"),"SECRET=not-public");
   await writeFile(join(root,".git","config"),"secret-config");
   await writeFile(join(dir,"private.svg"),"TOP-SECRET");
-  await symlink(join(dir,"private.svg"),join(root,"assets","linked.svg"));
+  // Windows without symlink rights: the link is absent and still must 404.
+  await symlink(join(dir,"private.svg"),join(root,"assets","linked.svg")).catch((e)=>{if(e.code!=="EPERM")throw e;});
   const server=createStaticServer(root);
   server.listen(0,"127.0.0.1");
   await once(server,"listening");
