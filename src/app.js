@@ -126,7 +126,7 @@ function renderServerRows(servers) {
 const AUDIT_LABELS = {
   "POST /actions/start":"서버 시작", "POST /actions/stop":"서버 중지", "POST /actions/restart":"재시작",
   "PATCH /startup":"시작 설정 변경", "POST /servers":"서버 생성", "POST /commands":"콘솔 명령",
-  "PUT /files/upload":"파일 업로드", "DELETE /files":"파일 삭제", "POST /files/mkdir":"폴더 생성", "PATCH /files/rename":"이름 변경",
+  "PUT /files/upload":"파일 업로드", "DELETE /files":"파일 삭제", "POST /files/mkdir":"폴더 생성", "PATCH /files/rename":"이름 변경", "POST /files/extract":"압축 풀기", "POST /files/compress":"압축",
   "POST /backups":"백업 생성", "DELETE /backups":"백업 삭제", "POST /backups/restore":"백업 복원",
   "POST /install":"JAR 설치", "POST /install/upgrade":"JAR 업데이트", "POST /install/rollback":"JAR 롤백",
   "POST /schedules":"예약 추가", "DELETE /schedules":"예약 삭제", "PATCH /network":"포트 변경",
@@ -398,6 +398,7 @@ function renderFileRows(){
       '<td class="numeric">'+(folder?"—":fileSize(f.size))+'</td>'+
       '<td class="numeric">'+h(new Date(f.modified).toLocaleString(uiLocale(),{dateStyle:"short",timeStyle:"short"}))+'</td>'+
       '<td class="file-row-actions">'+
+        (/\.zip$/i.test(f.name)?'<button class="mini-btn" data-action="file-extract" data-name="'+name+'">풀기</button>':'')+
         (folder?'':'<button class="mini-btn" data-action="file-edit" data-name="'+name+'">편집</button>'+
           '<button class="mini-btn" data-action="file-download" data-name="'+name+'">받기</button>')+
         '<button class="mini-btn" data-action="file-rename" data-name="'+name+'">이름</button>'+
@@ -407,7 +408,7 @@ function renderFileRows(){
 function renderFileSelectionBar(){
   const n=state.fileSelection.size;
   if(!n)return '<span class="hint">'+state.fileEntries.length+'개 항목</span>';
-  return '<strong>'+n+'개 선택</strong>'+button("다운로드","file-download-selected","small")+
+  return '<strong>'+n+'개 선택</strong>'+button("압축","file-compress","small")+button("다운로드","file-download-selected","small")+
     button("삭제","file-delete-selected","small danger")+button("선택 해제","file-clear-selection","small");
 }
 // Selection changes only toggle classes so an in-progress drag is not torn down.
@@ -434,6 +435,10 @@ function selectFile(name,event){
   }else{state.fileSelection=new Set([name]);state.fileAnchor=index;}
   refreshFileSelection();
 }
+function confirmExtract(name){
+  setModal({kind:"confirm",title:"'"+name+"' 압축을 풀까요?",description:"이 폴더에 풀며, 이름이 같은 기존 파일은 덮어씁니다.",
+    path:relativeFile(name),confirmLabel:"압축 풀기",confirmAction:"file-extract-run"});
+}
 async function openFolder(path){
   state.filePath=path;state.fileSelection=new Set();state.fileAnchor=-1;state.fileQuery="";
   await loadFiles();
@@ -441,6 +446,7 @@ async function openFolder(path){
 async function openFileEntry(name){
   const entry=state.fileEntries.find(f=>f.name===name);if(!entry)return;
   if(entry.type==="folder")return openFolder(relativeFile(name));
+  if(/\.zip$/i.test(name))return confirmExtract(name);
   if(BINARY_FILE.test(name))return downloadEntry(name);
   await openTextFile(name);
 }
@@ -1019,9 +1025,9 @@ function modalBody() {
     '<div class="modal-actions"><span class="hint">Ctrl+S 저장</span><span class="toolbar-spacer"></span>'+
     '<button type="button" class="btn" data-action="modal-close">닫기</button>'+
     '<button class="btn primary" type="submit">저장</button></div></form></div>';
-  if (m.kind==="file-mkdir" || m.kind==="file-rename" || m.kind==="file-new") {
-    const formId={"file-mkdir":"folder-create-form","file-rename":"file-rename-form","file-new":"file-create-form"}[m.kind];
-    const title={"file-mkdir":"새 폴더","file-rename":"이름 변경","file-new":"새 파일"}[m.kind];
+  if (m.kind==="file-mkdir" || m.kind==="file-rename" || m.kind==="file-new" || m.kind==="file-compress") {
+    const formId={"file-mkdir":"folder-create-form","file-rename":"file-rename-form","file-new":"file-create-form","file-compress":"file-compress-form"}[m.kind];
+    const title={"file-mkdir":"새 폴더","file-rename":"이름 변경","file-new":"새 파일","file-compress":"압축 파일 만들기"}[m.kind];
     return '<div class="modal-scrim" data-action="modal-background">'+
     '<form class="modal" id="'+formId+'" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
     '<h2 id="modal-title">'+title+'</h2>'+
@@ -1173,7 +1179,7 @@ function setModal(modal) {
     const input = $("#palette-search");
     input?.focus();
   } else if (modal?.kind === "create") $("#new-server-name")?.focus();
-  else if (["file-rename","file-new","file-mkdir"].includes(modal?.kind)) $("#file-new-name")?.focus();
+  else if (["file-rename","file-new","file-mkdir","file-compress"].includes(modal?.kind)) $("#file-new-name")?.select();
   else if (modal?.kind === "file-editor") $("#file-editor-text")?.focus();
   else if (modal) $("#modal-root .btn")?.focus();
 }
@@ -1774,8 +1780,20 @@ document.addEventListener("click",async(event) => {
   if (action==="file-delete-selected"){confirmDelete([...state.fileSelection]);return;}
   if (action==="file-download-selected"){
     const files=[...state.fileSelection].filter(n=>state.fileEntries.find(f=>f.name===n)?.type==="file");
-    if(!files.length)return toast("폴더는 다운로드할 수 없습니다. 파일을 선택하세요.");
+    if(!files.length)return toast("폴더는 먼저 압축한 뒤 받을 수 있습니다.");
     files.forEach((name,i)=>setTimeout(()=>downloadEntry(name),i*400));return;
+  }
+  if (action==="file-extract"){confirmExtract(target.dataset.name);return;}
+  if (action==="file-extract-run"){
+    const path=state.modal?.path;setModal(null);if(!path)return;
+    toast("압축을 푸는 중입니다…");
+    try{const r=await apiRequest(fileApi("/extract"),{method:"POST",body:{path},timeoutMs:600000});toast(r.files+"개 파일의 압축을 풀었습니다.");}
+    catch(e){toast(e.message);}
+    await loadFiles();return;
+  }
+  if (action==="file-compress"){
+    const names=[...state.fileSelection];if(!names.length)return;
+    setModal({kind:"file-compress",names,name:(names.length===1?names[0].replace(/\.[^.]+$/,""):"archive")+".zip"});return;
   }
   if (action==="file-clear-selection"){state.fileSelection=new Set();refreshFileSelection();return;}
   if (action==="file-goto"){await openFolder(target.dataset.path||"");return;}
@@ -1948,7 +1966,7 @@ document.addEventListener("submit",async(event) => {
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
   }
-  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form","port-form","server-delete-form"].includes(form.id))return;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form","port-form","server-delete-form","file-compress-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="jar-upgrade-form"){
     const template=state.startupLive?.template;
@@ -1984,6 +2002,16 @@ document.addEventListener("submit",async(event) => {
       setModal(null);state.fileSelection=new Set([name]);await loadFiles();
       if(form.id==="file-create-form")await openTextFile(name);else toast("완료되었습니다.");
     }catch(e){toast(e.message);}return;
+  }
+  if(form.id==="file-compress-form"){
+    const modal=state.modal,name=String(new FormData(form).get("name")||"").trim();if(!modal||!name)return;
+    setModal(null);toast("압축하는 중입니다…");
+    try{
+      const r=await apiRequest(fileApi("/compress"),{method:"POST",timeoutMs:600000,
+        body:{folder:state.filePath,paths:modal.names.map(relativeFile),name}});
+      state.fileSelection=new Set([r.path.split("/").pop()]);toast("압축 파일을 만들었습니다: "+r.path.split("/").pop());
+    }catch(e){toast(e.message);}
+    await loadFiles();return;
   }
   if(form.id==="server-delete-form"){
     const modal=state.modal;if(!modal||String(new FormData(form).get("name"))!==modal.name)return;

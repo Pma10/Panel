@@ -185,6 +185,13 @@ export const EN = {
   "백업 준비 중 서버 로그 연결이 끊겼습니다.": "Lost the server log while preparing the backup.",
   "서버가 월드 저장을 끝내지 않아 백업을 취소했습니다.": "The server did not finish saving the world, so the backup was cancelled.",
 
+  // Zip
+  "풀기": "Extract", "압축": "Zip", "압축 풀기": "Extract", "압축 파일 만들기": "Create zip", "압축을 푸는 중입니다…": "Extracting…",
+  "압축하는 중입니다…": "Zipping…", "이 폴더에 풀며, 이름이 같은 기존 파일은 덮어씁니다.": "Extracts into this folder; files with the same name are overwritten.",
+  "폴더는 먼저 압축한 뒤 받을 수 있습니다.": "Zip folders first to download them.", "zip 파일만 압축을 풀 수 있습니다.": "Only .zip files can be extracted.",
+  "zip 파일을 읽을 수 없습니다.": "Cannot read the zip file.", "압축을 풀면 크기 제한(8GiB)을 넘습니다.": "Extracting would exceed the 8 GiB limit.",
+  "압축할 항목을 선택하세요.": "Select items to zip.", "압축할 파일이 너무 많거나 큽니다 (최대 8GiB).": "Too many or too large files to zip (8 GiB max).",
+
   // Server error messages (Go backend)
   "비밀번호는 12자 이상이어야 합니다.": "Passwords must be at least 12 characters.", "비밀번호가 너무 깁니다.": "The password is too long.",
   "아이디는 3~32자의 영문, 숫자, _ - . 만 사용할 수 있습니다.": "Usernames are 3–32 letters, digits, _ - or .",
@@ -307,6 +314,16 @@ export const EN_PATTERNS = [
     "Another program is using port $1, so the server cannot start."],
   [/^'(.+)' 계정을 삭제할까요\?$/, "Delete account '$1'?"],
   [/^서버를 삭제했습니다: (.+)$/, "Deleted server $1"],
+  [/^'(.+)' 압축을 풀까요\?$/, "Extract '$1'?"],
+  [/^(\d+)개 파일의 압축을 풀었습니다\.$/, "Extracted $1 files."],
+  [/^압축 파일을 만들었습니다: (.+)$/, "Created $1"],
+  [/^같은 이름의 파일이 이미 있습니다: (.+)$/, "$1 already exists."],
+  [/^안전하지 않은 경로가 들어 있어 압축 풀기를 중단했습니다: (.+)$/, "Stopped: the archive contains an unsafe path: $1"],
+  [/^압축 파일 안의 항목이 너무 많습니다 \(최대 (\d+)개\)\.$/, "The archive has too many entries (max $1)."],
+  [/^zip 항목이 손상되었습니다: (.+)$/, "Damaged zip entry: $1"],
+  [/^같은 이름의 파일이 있어 폴더를 만들 수 없습니다: (.+)$/, "A file blocks creating folder $1"],
+  [/^폴더를 파일로 덮어쓸 수 없습니다: (.+)$/, "Cannot overwrite folder $1 with a file"],
+  [/^파일을 읽을 수 없습니다 \(서버가 사용 중인 파일일 수 있습니다\): (.+)$/, "Cannot read $1 (it may be in use by the server)."],
   [/^파일을 읽을 수 없어 백업을 중단했습니다 (서버가 사용 중인 파일일 수 있습니다): (.+)$/, "Backup stopped: cannot read $1 (it may be locked by the server)."],
   [/^백업 중 파일 크기가 변경되었습니다: (.+)$/, "A file changed during the backup: $1"],
   [/^백업 #(.+)으로 복원하면 현재 월드 데이터가 바뀔 수 있습니다\. 복원 전에 별도 백업을 권장합니다\.$/,

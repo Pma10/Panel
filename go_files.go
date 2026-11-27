@@ -203,6 +203,20 @@ func (a *panelAPI)filesRoute(w http.ResponseWriter,r *http.Request,id,route,acto
   if err:=a.manager.renameFile(id,input.From,input.To);err!=nil{return err}
   a.audit.append(actor,"PATCH /files/rename",id)
   jsonReply(w,200,map[string]bool{"renamed":true});return nil
+ case "files/extract":
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  var input struct{Path string `json:"path"`}
+  if err:=decodeBody(r,&input);err!=nil{return err}
+  count,err:=a.manager.extractZip(id,input.Path);if err!=nil{return err}
+  a.audit.append(actor,"POST /files/extract",id)
+  jsonReply(w,200,map[string]int{"files":count});return nil
+ case "files/compress":
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  var input struct{Folder string `json:"folder"`;Paths []string `json:"paths"`;Name string `json:"name"`}
+  if err:=decodeBody(r,&input);err!=nil{return err}
+  output,err:=a.manager.compressPaths(id,input.Folder,input.Paths,input.Name);if err!=nil{return err}
+  a.audit.append(actor,"POST /files/compress",id)
+  jsonReply(w,201,map[string]string{"path":output});return nil
  default:return apiError{404,"파일 API를 찾을 수 없습니다."}
  }
 }

@@ -45,6 +45,7 @@ Docker도, 데이터베이스도, Node.js도 필요 없습니다.
 **파일**
 - 서버가 켜져 있어도 편집·업로드
 - 더블클릭으로 열기, 바탕화면에서 파일·폴더 끌어다 놓기, 폴더로 끌어 이동, 다중 선택, 단축키
+- zip 압축·압축 풀기 (월드를 zip으로 올려 바로 풀기, 폴더를 zip으로 받기)
 - [Monaco](https://microsoft.github.io/monaco-editor/) 편집기 (YAML·JSON·properties 문법 강조, Ctrl+S)
 
 **네트워크 · 백업 · 예약**
