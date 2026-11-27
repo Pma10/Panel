@@ -175,3 +175,22 @@ func TestStaticAssetsAreCompressedAndRevalidated(t *testing.T) {
 		t.Fatalf("unchanged asset should be 304, got %d", again.StatusCode)
 	}
 }
+
+func TestResetPasswordReplacesLostPassword(t *testing.T) {
+	a := mustAuthenticator("old-password-1234", "http://panel.test")
+	if _, err := a.resetPassword("nobody"); err == nil {
+		t.Fatal("unknown account reset")
+	}
+	password, err := a.resetPassword("admin")
+	if err != nil || len(password) < 12 {
+		t.Fatalf("reset: %q %v", password, err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "http://panel.test/api/v1/auth/login", nil)
+	r.Header.Set("Origin", "http://panel.test")
+	if _, _, err := a.login(r, "admin", "old-password-1234"); err == nil {
+		t.Fatal("old password still works")
+	}
+	if _, _, err := a.login(r, "admin", password); err != nil {
+		t.Fatalf("new password rejected: %v", err)
+	}
+}

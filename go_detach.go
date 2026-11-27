@@ -15,6 +15,7 @@ import (
 //   - .panel-process: PID, a start-time identity (guards against PID reuse)
 //     and, on Windows, the child's own handle to its stdin pipe;
 //   - .panel-console.log: the server's stdout/stderr, which the panel tails.
+//
 // The child also holds a write end of its stdin pipe, so the pipe never hits
 // EOF when the panel goes away and the console keeps accepting commands.
 const processMarkerFile = ".panel-process"

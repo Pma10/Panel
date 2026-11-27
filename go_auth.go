@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -415,6 +416,42 @@ func (a *authenticator) changePassword(token, username, current, next string) er
 		}
 	}
 	return nil
+}
+
+// resetPassword replaces an account's password with a random one and ends
+// its sessions. Used by the --reset-password command for lost passwords.
+func (a *authenticator) resetPassword(username string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	user, ok := a.users[username]
+	if !ok {
+		names := []string{}
+		for name := range a.users {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		return "", fmt.Errorf("no account %q (accounts: %s)", username, strings.Join(names, ", "))
+	}
+	password := secureToken()[:20]
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	updated := user
+	updated.Salt = hex.EncodeToString(salt)
+	updated.Hash = hex.EncodeToString(hashPassword(password, salt, passwordIterations))
+	updated.Iterations = passwordIterations
+	a.users[username] = updated
+	if err := a.saveUsersLocked(); err != nil {
+		a.users[username] = user
+		return "", err
+	}
+	for token, s := range a.sessions {
+		if s.username == username {
+			a.revokeLocked(token)
+		}
+	}
+	return password, nil
 }
 
 func (a *authenticator) session(r *http.Request) (string, authSession, error) {

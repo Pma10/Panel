@@ -96,11 +96,11 @@ func (m *manager) searchPlugins(ctx context.Context, id, source, query string) (
 		}
 		var res struct {
 			Result []struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-				AvatarURL   string `json:"avatarUrl"`
+				Name        string                       `json:"name"`
+				Description string                       `json:"description"`
+				AvatarURL   string                       `json:"avatarUrl"`
 				Namespace   struct{ Owner, Slug string } `json:"namespace"`
-				Stats       struct{ Downloads int } `json:"stats"`
+				Stats       struct{ Downloads int }      `json:"stats"`
 			} `json:"result"`
 		}
 		if json.Unmarshal(data, &res) != nil {
@@ -175,8 +175,8 @@ func resolvePlugin(ctx context.Context, t pluginTarget, source, id string) (reso
 		}
 		var res struct {
 			Result []struct {
-				Name    string `json:"name"`
-				Channel struct{ Name string } `json:"channel"`
+				Name      string                `json:"name"`
+				Channel   struct{ Name string } `json:"channel"`
 				Downloads map[string]struct {
 					ExternalURL *string `json:"externalUrl"`
 					DownloadURL string  `json:"downloadUrl"`

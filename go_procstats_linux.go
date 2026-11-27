@@ -13,9 +13,9 @@ import (
 const clockTicks = 100
 
 type procStat struct {
-	ppid      int
-	cpuTicks  uint64
-	rssPages  uint64
+	ppid     int
+	cpuTicks uint64
+	rssPages uint64
 }
 
 func readProcStat(pid int) (procStat, bool) {
