@@ -40,33 +40,8 @@ func (m *manager) runScheduledJob(work scheduledJob){
   }
   return
  }
- // Cold backup: stop -> snapshot -> start. There is scheduled downtime.
- m.mu.Lock()
- s,err:=m.get(work.id)
- var process *managedProcess
- if err==nil{process=s.process}
- m.mu.Unlock()
- if err!=nil{return}
- if process!=nil{
-  if err:=m.stop(work.id);err!=nil{
-   m.log(work.id,"WARN","예약 백업 전 종료 실패: "+err.Error());return
-  }
-  select{
-  case <-process.done:
-  case <-ctx.Done():
-   m.log(work.id,"WARN","예약 백업을 위한 서버 종료 시간 초과")
-   return
-  }
- }
+ // Running servers are backed up live (save-off/save-all), so no downtime.
  if _,err:=m.backup(ctx,work.id);err!=nil{
   m.log(work.id,"WARN","예약 백업 실패: "+err.Error())
- }
- m.mu.Lock()
- closing:=m.closing
- m.mu.Unlock()
- if process!=nil&&!closing{
-  if _,err:=m.start(work.id);err!=nil{
-   m.log(work.id,"WARN","백업 후 서버 재시작 실패: "+err.Error())
-  }
  }
 }

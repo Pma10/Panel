@@ -21,7 +21,7 @@
 | `go_java.go` | 설치된 Java 검색, 실행 명령어 템플릿 해석 |
 | `go_files.go` | 서버 디렉터리에 한정된 파일 스트리밍·업로드 |
 | `go_templates.go` | 공식 Paper/Folia 안정 JAR, 무결성 확인, 이전 버전 복구 |
-| `go_backups.go` | 일관성 있는 정지 상태 백업·복원 및 예약 작업 정의 |
+| `go_backups.go`, `go_backup_live.go` | 백업·복원 (실행 중이면 save-off/save-all 후 복사), 예약 작업 정의 |
 | `go_scheduler.go` | 최대 2개 동시 예약 작업자, 128개 작업 대기열 |
 | `go_metrics.go` | Minecraft 상태 핑과 Linux Java RSS |
 | `go_diagnostics.go` | 요청할 때만 읽는 Go 힙·RSS·GC 진단 |

@@ -130,7 +130,7 @@ const AUDIT_LABELS = {
   "POST /backups":"백업 생성", "DELETE /backups":"백업 삭제", "POST /backups/restore":"백업 복원",
   "POST /install":"JAR 설치", "POST /install/upgrade":"JAR 업데이트", "POST /install/rollback":"JAR 롤백",
   "POST /schedules":"예약 추가", "DELETE /schedules":"예약 삭제", "PATCH /network":"포트 변경",
-  "POST /auth/setup":"첫 계정 생성", "POST /auth/password":"비밀번호 변경"
+  "POST /auth/setup":"첫 계정 생성", "POST /auth/password":"비밀번호 변경", "DELETE /servers":"서버 삭제"
 };
 const auditLabel = (action) => AUDIT_LABELS[action] || (/^POST \/users /.test(action) ? "계정 생성" : /^DELETE \/users /.test(action) ? "계정 삭제" : action);
 const serverNameOf = (id) => state.servers.find((x) => x.id === id)?.name || "";
@@ -192,8 +192,8 @@ function renderOverview() {
     powerButtons(s);
   const metrics = [
     ["접속 인원",fmtPlayers(s),"현재 플레이어"],
-    ["TPS",s.tps == null ? "—" : s.tps.toFixed(1),"틱 처리율"],
-    ["MSPT",s.mspt == null ? "—" : s.mspt.toFixed(1),"평균 처리 시간"],
+    ["서버 종류",s.kind||"—","설치된 서버 JAR"],
+    ["할당 메모리",s.memoryLimitGb+" GB","최대 힙 (-Xmx)"],
     ["가동 시간",s.uptime,"마지막 시작 이후"]
   ].map(([title,value,note]) => `<div class="card stat-card"><span>${h(title)}</span><strong>${h(value)}</strong><small>${h(note)}</small></div>`).join("");
   const resources = [
@@ -209,6 +209,8 @@ function renderOverview() {
     <div class="grid-stats">${metrics}</div><div class="two-col">${resources}</div>
     ${card("실행 환경",`<div class="info-list"><div class="info-line"><strong>실행 경로</strong><span class="right mono">${h(s.directory)}</span></div>
     <div class="info-line"><strong>접속 포트</strong><span class="right mono">${h(s.port)}</span></div></div>`)}
+    ${state.mode==="live"?`<section class="card danger-zone"><div><strong>서버 삭제</strong><p>서버 폴더와 모든 백업을 지웁니다. 되돌릴 수 없습니다.</p></div>
+      ${button("서버 삭제","server-delete","danger",s.status==="stopped"?"":'disabled title="서버를 중지해야 삭제할 수 있습니다."')}</section>`:""}
     ${demoNote()}`;
 }
 const emptyServer = () => `<div class="card empty-state">${icon("server","large")}<strong>선택된 서버가 없습니다</strong><p>서버 목록에서 서버를 선택하세요.</p><a class="btn" href="#/servers">서버 목록 열기</a></div>`;
@@ -591,7 +593,7 @@ function renderLiveBackups(){
   const stopped=server()?.status==="stopped";
   const total=list.reduce((sum,x)=>sum+(Number(x.size)||0),0);
   return header("백업","서버 월드와 파일을 실제 폴더 스냅샷으로 보관합니다",
-    button(icon("plus","small")+" 새 백업","backup-create","primary",stopped?"":"disabled"))+
+    button(icon("plus","small")+" 새 백업","backup-create","primary",["stopped","running"].includes(server()?.status)?"":"disabled"))+
     liveViewStatus()+
     '<div class="grid-stats" style="grid-template-columns:repeat(2,minmax(0,1fr))">'+
       '<div class="card stat-card"><span>백업 개수</span><strong>'+list.length+'</strong></div>'+
@@ -602,7 +604,7 @@ function renderLiveBackups(){
       button("복원","backup-restore","small",'data-id="'+h(b.id)+'" '+(stopped?'':'disabled'))+
       button("삭제","backup-delete","danger",'data-id="'+h(b.id)+'"')+'</div>').join("")||
       '<div class="empty-state"><strong>백업이 없습니다.</strong><p>새 백업을 생성해 보세요.</p></div>')+'</div>')+
-    '<div class="notice">백업 생성과 복원은 서버가 중지된 상태에서만 가능합니다. 예약 백업은 자동으로 서버를 중지·재시작하므로 접속 중단이 발생할 수 있습니다.</div>';
+    '<p class="hint">실행 중인 서버는 저장을 잠시 멈추고(save-off) 백업하므로 접속이 끊기지 않습니다. 복원은 서버를 중지해야 합니다.</p>';
 }
 function renderJarUpgrade(st){
   if(!st || !["paper","folia","purpur","leaf","velocity"].includes(st.template))return "";
@@ -969,6 +971,11 @@ function modalBody() {
       <span>${h(s.name)}</span>${badge(s.status)}</button>`).join("")}</div>
       <div class="modal-actions" style="margin-top:22px"><button class="btn" data-action="modal-close">닫기</button></div>
     </div></div>`;
+  if (m.kind === "server-delete") return '<div class="modal-scrim" data-action="modal-background"><form class="modal" id="server-delete-form" role="dialog" aria-modal="true" aria-labelledby="modal-title">'+
+    '<h2 id="modal-title">서버를 삭제할까요?</h2><p>서버 폴더, 월드, 모든 백업이 지워지며 되돌릴 수 없습니다. 확인을 위해 서버 이름을 입력하세요.</p>'+
+    '<div class="form-group"><label for="delete-confirm-name" data-no-i18n>'+h(m.name)+'</label><input class="field" id="delete-confirm-name" name="name" autocomplete="off" required></div>'+
+    '<div class="modal-actions" style="margin-top:22px"><button type="button" class="btn" data-action="modal-close">취소</button>'+
+    '<button type="submit" class="btn danger" id="delete-confirm-button" disabled>서버 삭제</button></div></form></div>';
   if (m.kind === "palette") return `<div class="modal-scrim" data-action="modal-background"><div class="modal command-palette" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <h2 id="modal-title">기능 검색</h2>
     <input id="palette-search" class="field" placeholder="메뉴 검색" autocomplete="off" aria-label="기능 검색" value="${h(state.paletteQuery)}">
@@ -1391,6 +1398,12 @@ async function switchSelectedServer(id,destination="overview") {
     connectLogStream();
   }
 }
+// The API reports uptime as "<seconds>초".
+function formatUptime(value){
+  const m=/^(d+)초$/.exec(String(value||""));if(!m)return value||"—";
+  const t=Number(m[1]),hours=Math.floor(t/3600),minutes=Math.floor(t%3600/60);
+  return hours?hours+"시간 "+minutes+"분":minutes?minutes+"분 "+(t%60)+"초":t+"초";
+}
 function normalizeLiveServer(it){
   return {...it,
     status:it.status||"unknown",
@@ -1399,9 +1412,7 @@ function normalizeLiveServer(it){
     memoryGb:it.memoryGb==null?null:(Number(it.memoryGb)||0),
     memoryLimitGb:Number(it.memoryLimitGb)||Number(it.memoryMb||2048)/1024,
     cpu:it.cpu==null?null:Number(it.cpu),
-    directory:it.directory||"—",version:it.version||"—",uptime:it.uptime||"—",
-    tps:it.tps==null?null:(Number.isFinite(Number(it.tps))?Number(it.tps):null),
-    mspt:it.mspt==null?null:(Number.isFinite(Number(it.mspt))?Number(it.mspt):null)
+    directory:it.directory||"—",version:it.version||"—",uptime:formatUptime(it.uptime),
   };
 }
 // Status-only refresh: full re-render only on read-only pages without an open
@@ -1573,6 +1584,9 @@ document.addEventListener("input",(event) => {
   if (event.target.id === "log-search") { state.query=event.target.value;scheduleLogUpdate(); }
   if (event.target.id === "server-search") { state.serverQuery=event.target.value;state.serverPage=0;filterServerRows(); }
   if (event.target.id === "console-command") { state.command=event.target.value;state.commandIndex=-1; }
+  if (event.target.id === "delete-confirm-name") {
+    const button=$("#delete-confirm-button");if(button)button.disabled=event.target.value!==state.modal?.name;
+  }
   if (event.target.id === "file-search") {
     state.fileQuery=event.target.value;
     const body=$("#file-tbody");if(body){body.innerHTML=renderFileRows();refreshFileSelection();}
@@ -1778,6 +1792,7 @@ document.addEventListener("click",async(event) => {
     await loadFiles();return;
   }
   if (action==="open-log-folder"){state.filePath="logs";state.fileSelection=new Set();state.fileQuery="";navigate("files");return;}
+  if (action==="server-delete"){const s=server();if(s){setModal({kind:"server-delete",id:s.id,name:s.name});$("#delete-confirm-name")?.focus();}return;}
   if (action==="auto-restart-toggle" && state.mode==="live"){
     const s=server();if(!s)return;
     try{
@@ -1809,7 +1824,7 @@ document.addEventListener("click",async(event) => {
     try{await apiRequest("/users/"+encodeURIComponent(name),{method:"DELETE"});toast("계정을 삭제했습니다.");await refreshRouteData();}
     catch(e){toast(e.message);}return;
   }
-  if (action==="backup-create"){setModal({kind:"confirm",title:"새 백업을 생성할까요?",description:"현재 월드 상태를 백업합니다.",
+  if (action==="backup-create"){setModal({kind:"confirm",title:"새 백업을 생성할까요?",description:server()?.status==="running"?"월드를 저장한 뒤 잠시 저장을 멈추고 백업합니다. 플레이어 접속은 유지됩니다.":"현재 월드 상태를 백업합니다.",
     confirmLabel:"백업 생성",confirmAction:"backup-run"});return;}
   if (action==="backup-run"){await createBackup();return;}
   if (action==="backup-restore"){
@@ -1933,7 +1948,7 @@ document.addEventListener("submit",async(event) => {
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
   }
-  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form","port-form"].includes(form.id))return;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form","port-form","server-delete-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="jar-upgrade-form"){
     const template=state.startupLive?.template;
@@ -1968,6 +1983,14 @@ document.addEventListener("submit",async(event) => {
       else await apiRequest(fileApi("/rename"),{method:"PATCH",body:{from:relativeFile(state.modal?.name||""),to:relativeFile(name)}});
       setModal(null);state.fileSelection=new Set([name]);await loadFiles();
       if(form.id==="file-create-form")await openTextFile(name);else toast("완료되었습니다.");
+    }catch(e){toast(e.message);}return;
+  }
+  if(form.id==="server-delete-form"){
+    const modal=state.modal;if(!modal||String(new FormData(form).get("name"))!==modal.name)return;
+    try{
+      await apiRequest("/servers/"+encodeURIComponent(modal.id),{method:"DELETE"});
+      setModal(null);toast("서버를 삭제했습니다: "+modal.name);
+      state.selectedId="";await loadFromApi();navigate("dashboard");
     }catch(e){toast(e.message);}return;
   }
   if(form.id==="port-form"){

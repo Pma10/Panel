@@ -194,6 +194,11 @@ func (a *panelAPI)route(w http.ResponseWriter,r *http.Request)error{
  id:=parts[1]
  if _,err:=a.manager.summary(id);err!=nil{return err}
  rest:=strings.Join(parts[2:],"/")
+ if rest=="" && r.Method=="DELETE"{
+  if err:=a.manager.deleteServer(id);err!=nil{return err}
+  a.audit.append(actor,"DELETE /servers",id)
+  jsonReply(w,200,map[string]bool{"deleted":true});return nil
+ }
  if rest==""{
   if err:=assertMethod(r,"GET");err!=nil{return err}
   value,err:=a.manager.summary(id);if err!=nil{return err};jsonReply(w,200,value);return nil

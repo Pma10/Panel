@@ -11,6 +11,7 @@ import (
  "os"
  "os/exec"
  "net"
+ "log"
  "path/filepath"
  "regexp"
  "strconv"
@@ -180,7 +181,7 @@ func (m *manager) describe(s *managedServer)map[string]any{
  return map[string]any{
   "id":s.cfg.ID,"name":s.cfg.Name,"kind":serverKind(s.cfg),"status":state,
   "memoryMb":s.cfg.MemoryMb,"memoryLimitGb":float64(s.cfg.MemoryMb)/1024,"memoryGb":mem,
-  "players":players,"maxPlayers":maxPlayers,"tps":nil,"mspt":nil,"cpu":cpu,"port":s.cfg.Port,
+  "players":players,"maxPlayers":maxPlayers,"cpu":cpu,"port":s.cfg.Port,
   "jar":s.cfg.Jar,"version":version,"directory":m.dir(s.cfg.ID),"uptime":uptime,
   "eulaAccepted":s.cfg.EulaAccepted,"autoRestart":s.cfg.AutoRestart,
   "javaBin":s.cfg.JavaBin,"startCommand":s.cfg.StartCommand,
@@ -240,6 +241,28 @@ func (m *manager) create(c serverConfig)(map[string]any,error){
  if err:=m.saveLocked();err!=nil{delete(m.servers,c.ID);return nil,err}
  success=true
  return m.describe(s),nil
+}
+// deleteServer removes a stopped server, its files and its backups.
+func (m *manager) deleteServer(id string)error{
+ m.mu.Lock()
+ s,err:=m.get(id)
+ if err==nil{err=m.checkMutationLocked(s,true)}
+ if err!=nil{m.mu.Unlock();return err}
+ if timer:=m.pendingRestarts[id];timer!=nil{timer.Stop();delete(m.pendingRestarts,id)}
+ delete(m.servers,id)
+ if err:=m.saveLocked();err!=nil{m.servers[id]=s;m.mu.Unlock();return err}
+ for ch:=range s.subscribers{close(ch);delete(s.subscribers,ch)}
+ m.mu.Unlock()
+ // Rename first so a half-finished removal never looks like a live server.
+ for _,dir:=range []string{m.dir(id),filepath.Join(m.root,"backups",id)}{
+  trash:=dir+".deleted-"+makeID()
+  if err:=os.Rename(dir,trash);err!=nil{
+   if !os.IsNotExist(err){log.Printf("delete server %s: %v",id,err)}
+   continue
+  }
+  if err:=os.RemoveAll(trash);err!=nil{log.Printf("delete server %s: leftover %s: %v",id,trash,err)}
+ }
+ return nil
 }
 func validJar(name string)bool{
  if len(name)<5||len(name)>100||!strings.HasSuffix(strings.ToLower(name),".jar"){return false}

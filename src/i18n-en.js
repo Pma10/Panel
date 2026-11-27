@@ -174,6 +174,17 @@ export const EN = {
   "JAR 업데이트": "JAR updated", "예약 추가": "Schedule added", "예약 삭제": "Schedule deleted", "첫 계정 생성": "First account created",
   "계정 생성": "Account created", "전체 보기 →": "View all →",
 
+  // Overview, delete server, live backup
+  "서버 종류": "Server type", "설치된 서버 JAR": "Installed server JAR", "할당 메모리": "Allocated memory", "최대 힙 (-Xmx)": "Max heap (-Xmx)",
+  "서버 삭제": "Delete server", "서버 폴더와 모든 백업을 지웁니다. 되돌릴 수 없습니다.": "Deletes the server folder and all its backups. This cannot be undone.",
+  "서버를 중지해야 삭제할 수 있습니다.": "Stop the server to delete it.", "서버를 삭제할까요?": "Delete this server?",
+  "서버 폴더, 월드, 모든 백업이 지워지며 되돌릴 수 없습니다. 확인을 위해 서버 이름을 입력하세요.": "The server folder, world and all backups are deleted for good. Type the server name to confirm.",
+  "실행 중인 서버는 저장을 잠시 멈추고(save-off) 백업하므로 접속이 끊기지 않습니다. 복원은 서버를 중지해야 합니다.": "Running servers are backed up with saving paused (save-off), so players stay connected. Restoring needs a stopped server.",
+  "월드를 저장한 뒤 잠시 저장을 멈추고 백업합니다. 플레이어 접속은 유지됩니다.": "Saves the world, pauses saving and backs up. Players stay connected.",
+  "서버가 시작을 마쳤거나 완전히 멈춘 상태에서 백업할 수 있습니다.": "Back up once the server has finished starting, or when it is fully stopped.",
+  "백업 준비 중 서버 로그 연결이 끊겼습니다.": "Lost the server log while preparing the backup.",
+  "서버가 월드 저장을 끝내지 않아 백업을 취소했습니다.": "The server did not finish saving the world, so the backup was cancelled.",
+
   // Server error messages (Go backend)
   "비밀번호는 12자 이상이어야 합니다.": "Passwords must be at least 12 characters.", "비밀번호가 너무 깁니다.": "The password is too long.",
   "아이디는 3~32자의 영문, 숫자, _ - . 만 사용할 수 있습니다.": "Usernames are 3–32 letters, digits, _ - or .",
@@ -251,16 +262,17 @@ export const EN = {
 };
 
 // Text built with numbers or names: [pattern on the Korean text, English replacement].
-const seconds = (s) => { s = Number(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
-  return h ? h + "h " + m + "m" : m ? m + "m " + (s % 60) + "s" : s + "s"; };
+// Uptime arrives already split into units by the app ("2시간 5분", "3분 31초").
+const uptimeEn = (u) => u.replace(/(\d+)시간/, "$1h").replace(/(\d+)분/, "$1m").replace(/(\d+)초/, "$1s");
+const UPTIME = "(\\d+시간 \\d+분|\\d+분 \\d+초|\\d+초)";
 export const EN_PATTERNS = [
   [/^(\d+)대 서버가 실행 중$/, "$1 running"],
   [/^전체 (\d+)대 중 중지 (\d+)대 · 서버 상태 확인$/, "$2 of $1 stopped"],
   [/^(\d+)대 등록$/, "$1 servers"],
   [/^(\d+)대 중 (\d+)–(\d+)대 표시$/, "Showing $2–$3 of $1"],
   [/^(\d+)명$/, "$1"],
-  [/^(\d+)초$/, (_, s) => seconds(s)],
-  [/^(.*) · 가동 (\d+)초$/, (_, v, s) => v + " · up " + seconds(s)],
+  [new RegExp("^" + UPTIME + "$"), (_, u) => uptimeEn(u)],
+  [new RegExp("^(.*) · 가동 " + UPTIME + "$"), (_, v, u) => v + " · up " + uptimeEn(u)],
   [/^(.*) · 가동 —$/, "$1 · not running"],
   [/^(.+) · 로그 확인 및 명령어 실행$/, "$1 · logs and commands"],
   [/^(\d+)줄 · 위로 스크롤해 이전 기록 보기$/, "$1 lines · scroll up for history"],
@@ -294,6 +306,9 @@ export const EN_PATTERNS = [
   [/^서버가 꺼져 있는데 (\d+) 포트를 다른 프로그램이 쓰고 있습니다\. 이대로는 서버를 시작할 수 없습니다\.$/,
     "Another program is using port $1, so the server cannot start."],
   [/^'(.+)' 계정을 삭제할까요\?$/, "Delete account '$1'?"],
+  [/^서버를 삭제했습니다: (.+)$/, "Deleted server $1"],
+  [/^파일을 읽을 수 없어 백업을 중단했습니다 (서버가 사용 중인 파일일 수 있습니다): (.+)$/, "Backup stopped: cannot read $1 (it may be locked by the server)."],
+  [/^백업 중 파일 크기가 변경되었습니다: (.+)$/, "A file changed during the backup: $1"],
   [/^백업 #(.+)으로 복원하면 현재 월드 데이터가 바뀔 수 있습니다\. 복원 전에 별도 백업을 권장합니다\.$/,
     "Restoring backup #$1 replaces the current world. Consider making a backup first."],
   [/^백업 #(.+)의 파일을 삭제합니다\. 삭제 후에는 이 백업으로 복원할 수 없습니다\.$/, "Deletes backup #$1. It cannot be restored afterwards."],

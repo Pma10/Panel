@@ -40,22 +40,44 @@ func copySnapshot(ctx context.Context,source,target string)(int64,int,error){
    return apiError{409,"심볼릭 링크 또는 특수 파일은 백업할 수 없습니다."}
   }
   if entry.IsDir(){return os.MkdirAll(dest,0700)}
+  // Panel bookkeeping (process marker, console capture, temp files) is never part of a world.
+  if filepath.Dir(rel)=="."&&strings.HasPrefix(entry.Name(),".panel-"){return nil}
+  // session.lock only marks a world as open by a running server (and is
+  // locked against reads on Windows); Minecraft recreates it on start.
+  if entry.Name()=="session.lock"{return nil}
   count++;total+=info.Size()
   if count>maxBackupFiles||total>maxBackupBytes{return apiError{413,"백업 파일 개수 또는 8GiB 크기 제한을 넘었습니다."}}
   in,err:=os.Open(path);if err!=nil{return err}
   out,err:=os.OpenFile(dest,os.O_CREATE|os.O_EXCL|os.O_WRONLY,0600)
   if err!=nil{in.Close();return err}
-  n,cpErr:=io.Copy(out,io.LimitReader(in,info.Size()+1))
+  // Copy the size seen at walk time: files that grow while a server runs
+  // (logs) are fine; a file that shrank cannot be copied consistently.
+  n,cpErr:=io.Copy(out,io.LimitReader(in,info.Size()))
   inErr:=in.Close();clErr:=out.Close()
-  if cpErr!=nil{return cpErr};if inErr!=nil{return inErr};if clErr!=nil{return clErr}
-  if n!=info.Size(){return apiError{409,"백업 중 파일 크기가 변경되었습니다."}}
+  if cpErr!=nil{return apiError{409,"파일을 읽을 수 없어 백업을 중단했습니다 (서버가 사용 중인 파일일 수 있습니다): "+filepath.ToSlash(rel)}}
+  if inErr!=nil{return inErr};if clErr!=nil{return clErr}
+  if n!=info.Size(){return apiError{409,"백업 중 파일 크기가 변경되었습니다: "+filepath.ToSlash(rel)}}
   return nil
  })
  return total,count,err
 }
 func (m *manager) backup(ctx context.Context,id string)(backupMeta,error){
- _,release,err:=m.beginBackup(id);if err!=nil{return backupMeta{},err}
+ s,release,err:=m.acquireMutation(id,false);if err!=nil{return backupMeta{},err}
  defer release()
+ m.mu.Lock()
+ p:=s.process
+ proxy:=s.cfg.Template=="velocity"
+ m.mu.Unlock()
+ if p!=nil{
+  if p.state!="running"{return backupMeta{},apiError{409,"서버가 시작을 마쳤거나 완전히 멈춘 상태에서 백업할 수 있습니다."}}
+  if !proxy{
+   resume,err:=m.pauseSaving(ctx,id)
+   if err!=nil{return backupMeta{},err}
+   defer resume()
+  }
+ } else if orphanJavaRunning(m.dir(id)){
+  return backupMeta{},apiError{409,"실행 중인 Java 프로세스를 완전히 종료한 뒤 변경하세요."}
+ }
  snapshot:=filepath.Join(m.root,"backups",id,makeID())
  if err:=os.MkdirAll(snapshot,0700);err!=nil{return backupMeta{},err}
  completed:=false
