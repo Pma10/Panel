@@ -61,6 +61,7 @@ export const ROUTE_INFO = [
   { route: "overview", label: "개요", icon: "grid", section: "server" },
   { route: "console", label: "콘솔", icon: "terminal", section: "server" },
   { route: "files", label: "파일", icon: "folder", section: "server" },
+  { route: "plugins", label: "플러그인", icon: "puzzle", section: "server" },
   { route: "backups", label: "백업", icon: "database", section: "server" },
   { route: "startup", label: "시작 설정", icon: "settings", section: "server" },
   { route: "network", label: "네트워크", icon: "network", section: "server" },

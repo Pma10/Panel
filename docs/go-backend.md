@@ -8,23 +8,21 @@
 
 ## 설치
 
-Go 1.23 이상과 서버 버전에 맞는 Java를 설치합니다. 아래는 Bash 로컬 실행 예제입니다.
+Go 1.24 이상과 서버 버전에 맞는 Java를 설치합니다. 아래는 Bash 로컬 실행 예제입니다.
 
 ```bash
 git clone --branch main https://github.com/Pma10/Panel.git
 cd Panel
 go build -trimpath -ldflags="-s -w" -o pconn .
 
-read -rsp 'Admin password (12+ chars): ' PANEL_ADMIN_PASSWORD && echo
-export PANEL_ADMIN_PASSWORD
 ./pconn
 ```
 
-Windows는 `go build -o pconn.exe .`와 PowerShell 환경 변수 설정을 사용합니다. 비밀번호 입력을 숨기는 예제는 [시작 가이드](getting-started.md)에 있습니다. 접속 주소는 `http://127.0.0.1:4173`입니다.
+Windows는 `go build -o pconn.exe .`로 빌드합니다. 접속 주소는 `http://127.0.0.1:4173`이며 처음 접속하면 첫 계정을 만듭니다.
 
 | 환경 변수 | 기본값 | 설명 |
 |---|---|---|
-| `PANEL_ADMIN_PASSWORD` | **필수** | 12자 이상의 관리자 비밀번호 |
+| `PANEL_ADMIN_PASSWORD` | 선택 | 계정이 없을 때 `admin` 계정을 만들 비밀번호(12자 이상). 로컬 전용이 아니면 첫 실행에 필수. 계정은 `PANEL_DATA_DIR/users.json`에 PBKDF2 해시로 저장 |
 | `PANEL_PORT` | `4173` | 패널 접속 포트 |
 | `PANEL_BIND_HOST` | `127.0.0.1` | 바인딩 주소 |
 | `PANEL_PUBLIC_ORIGIN` | `http://127.0.0.1:4173` | 관리자 브라우저의 실제 출처 |
@@ -40,7 +38,7 @@ Windows는 `go build -o pconn.exe .`와 PowerShell 환경 변수 설정을 사�
 - **서버 제어**: Java 실행, 정상 종료, 재시작 및 선택적 비정상 종료 후 재시작 정책
 - **실시간 콘솔**: SSE 구독, 표준 출력·오류 로그 수집, 명령어 전송
 - **파일 관리**: 탐색, 편집, 업로드, 다운로드, 이름 변경, 폴더 생성 및 삭제
-- **백업**: 최대 8GiB 및 10만 파일. 정지된 월드의 스냅샷 복원
+- **백업**: 최대 8GiB 및 10만 파일. 실행 중에는 save-off/save-all로 저장을 멈추고 복사, 복원은 정지 상태에서
 - **예약 작업**: 한국 시간 기준 일별·요일별 백업과 재시작
 - **관리자 인증**: HttpOnly 세션, SameSite, Origin/CSRF 검사 및 로그인 시도 제한
 - **모니터링**: Java 프로세스의 Linux RSS, Minecraft Java 상태 핑의 온라인 인원·버전
@@ -63,4 +61,4 @@ go test -race -count=1 ./...
 go build -trimpath -o pconn .
 ```
 
-백엔드의 로컬 검사 결과와 제외 항목은 [2026-11-16 검증 보고서](verification-2026-11-16.md)에 있습니다. **백엔드 검사 성공, 전체 저장소 CI 통과, 실제 서버 운영 검증은 서로 다릅니다.** GitHub Actions 실패 원인은 반환된 실행 단계 정보만으로 확정하지 못했습니다. 주요 서버를 전환하기 전에 전체 소스와 웹 자산을 포함한 검사, 실제 JAR 실행, 백업·복원과 운영 환경을 별도로 확인하세요.
+주요 서버를 전환하기 전에 테스트 서버에서 실제 JAR 실행, 백업·복원과 운영 환경을 먼저 확인하세요.

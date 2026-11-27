@@ -102,17 +102,20 @@ func TestRegressionUnmanagedProcessBlocksWorldChanges(t *testing.T) {
 	if !orphanJavaRunning(m.dir(id)) {
 		t.Fatal("fixture did not produce a real unmanaged process")
 	}
+	// File edits and settings are intentionally allowed while Java runs.
 	t.Run("file upload", func(t *testing.T) {
-		_, err := m.uploadFile(id, "level.dat", strings.NewReader("must not change world"))
-		wantAPIStatus(t, err, 409)
+		if _, err := m.uploadFile(id, "notes.txt", strings.NewReader("live edit")); err != nil {
+			t.Fatal(err)
+		}
 	})
 	t.Run("backup", func(t *testing.T) {
 		_, err := m.backup(context.Background(), id)
 		wantAPIStatus(t, err, 409)
 	})
 	t.Run("configuration", func(t *testing.T) {
-		_, err := m.update(id, map[string]json.RawMessage{"memoryMb": json.RawMessage(`2048`)})
-		wantAPIStatus(t, err, 409)
+		if _, err := m.update(id, map[string]json.RawMessage{"memoryMb": json.RawMessage(`2048`)}); err != nil {
+			t.Fatal(err)
+		}
 	})
 	t.Run("jar install", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())

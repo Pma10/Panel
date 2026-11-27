@@ -1,3 +1,3 @@
 module github.com/Pma10/Panel
 
-go 1.23
+go 1.24
