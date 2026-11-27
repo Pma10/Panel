@@ -12,6 +12,7 @@ Docker도, 데이터베이스도, Node.js도 필요 없습니다.
   <img src="https://img.shields.io/badge/Linux%20%C2%B7%20Windows%20%C2%B7%20macOS-243247?style=flat-square" alt="Linux · Windows · macOS" />
   <img src="https://img.shields.io/badge/Paper%20%C2%B7%20Purpur%20%C2%B7%20Leaf%20%C2%B7%20Folia%20%C2%B7%20Velocity-2f7d4f?style=flat-square" alt="Paper · Purpur · Leaf · Folia · Velocity" />
   <img src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4%20%C2%B7%20English-6b5fd3?style=flat-square" alt="한국어 · English" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License" /></a>
 </p>
 
 [빠른 시작](#빠른-시작) · [기능](#기능) · [화면](#화면) · [설정](#설정) · [운영](#linux-서비스로-운영) · [문서](#문서)
@@ -157,6 +158,6 @@ npm run dev          # 백엔드 없이 예시 데이터로 화면만 미리보�
 ---
 
 <div align="center">
-<sub>Panel은 Mojang Studios·Microsoft의 공식 제품이 아니며, PufferPanel·Pterodactyl과 무관한 별도 프로젝트입니다.</sub><br />
+<sub><a href="LICENSE">MIT License</a> · Panel은 Mojang Studios·Microsoft의 공식 제품이 아니며, PufferPanel·Pterodactyl과 무관한 별도 프로젝트입니다.</sub><br />
 <sub><a href="https://github.com/fonts-archive/Paperlogy">Paperlogy</a> · <a href="https://github.com/heydamir/unslop">Unslop</a> by Damir Sokolovsky · <a href="https://github.com/microsoft/monaco-editor">Monaco Editor</a> (MIT)</sub>
 </div>
