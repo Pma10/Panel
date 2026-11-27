@@ -4,6 +4,7 @@ import (
  "context"
  "crypto/md5"
  "crypto/sha256"
+ "crypto/sha512"
  "encoding/hex"
  "encoding/json"
  "fmt"
@@ -26,6 +27,7 @@ const leafReleasesAPI="https://api.github.com/repos/Winds-Studio/Leaf/releases?p
 var versionPattern=regexp.MustCompile("^[0-9]+(?:\\.[0-9]+){1,3}(?:-[a-zA-Z0-9._-]+)?$")
 var shaPattern=regexp.MustCompile("^[0-9a-f]{64}$")
 var md5Pattern=regexp.MustCompile("^[0-9a-f]{32}$")
+var sha512Pattern=regexp.MustCompile("^[0-9a-f]{128}$")
 var buildPattern=regexp.MustCompile("^[0-9]{1,9}$")
 var officialClient=&http.Client{Timeout:3*time.Minute,CheckRedirect:func(_ *http.Request,_ []*http.Request)error{return http.ErrUseLastResponse}}
 // fillProjects are served by PaperMC Fill v3 with SHA-256 checksums.
@@ -189,6 +191,45 @@ func downloadAllowed(project string,u *url.URL,first bool)bool{
  }
  return false
 }
+// fetchVerified downloads jar.URL into a temp file in dir, following
+// redirects only to hosts allow accepts, and checks size and checksum.
+// The caller removes the returned temp file once it has moved or used it.
+func fetchVerified(ctx context.Context,jar resolvedJar,allow func(*url.URL,bool)bool,dir string)(string,int64,error){
+ validHash:=(jar.Algorithm=="sha256"&&shaPattern.MatchString(jar.Hash))||(jar.Algorithm=="md5"&&md5Pattern.MatchString(jar.Hash))||
+  (jar.Algorithm=="sha512"&&sha512Pattern.MatchString(jar.Hash))
+ if !validHash||jar.Size<0||jar.Size>256<<20||(jar.Size>0&&jar.Size<1024){
+  return "",0,apiError{502,"공식 빌드 메타데이터가 올바르지 않습니다."}
+ }
+ download,err:=url.Parse(jar.URL)
+ if err!=nil||!allow(download,true){return "",0,apiError{502,"공식 다운로드 주소가 아닙니다."}}
+ var response *http.Response
+ for hop:=0;;hop++{
+  req,err:=http.NewRequestWithContext(ctx,"GET",download.String(),nil);if err!=nil{return "",0,err}
+  req.Header.Set("User-Agent","PConnPanel/0.2 (https://github.com/Pma10/Panel)")
+  response,err=officialClient.Do(req);if err!=nil{return "",0,apiError{502,"JAR 다운로드에 실패했습니다."}}
+  if response.StatusCode<300||response.StatusCode>=400{break}
+  location,err:=download.Parse(response.Header.Get("Location"))
+  response.Body.Close()
+  if err!=nil||hop>=4||!allow(location,false){return "",0,apiError{502,"허용되지 않은 다운로드 리디렉션입니다."}}
+  download=location
+ }
+ defer response.Body.Close()
+ if response.StatusCode!=200{return "",0,apiError{502,"JAR 응답 오류"}}
+ tmp:=filepath.Join(dir,".panel-"+makeID()+".download")
+ out,err:=os.OpenFile(tmp,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600);if err!=nil{return "",0,err}
+ var digest hash.Hash=sha256.New()
+ switch jar.Algorithm{case "md5":digest=md5.New();case "sha512":digest=sha512.New()}
+ limit:=jar.Size
+ if limit==0{limit=256<<20}
+ size,copyErr:=io.Copy(io.MultiWriter(out,digest),io.LimitReader(response.Body,limit+1))
+ syncErr:=out.Sync();closeErr:=out.Close()
+ if copyErr==nil{copyErr=syncErr};if copyErr==nil{copyErr=closeErr}
+ if copyErr!=nil{return tmp,0,copyErr}
+ if size>limit||(jar.Size>0&&size!=jar.Size)||size<1024||hex.EncodeToString(digest.Sum(nil))!=jar.Hash{
+  return tmp,0,apiError{502,"다운로드한 JAR의 체크섬 또는 크기가 일치하지 않습니다."}
+ }
+ return tmp,size,nil
+}
 func (m *manager)installTemplate(ctx context.Context,id,project,version string,updating bool)(map[string]any,error){
  if !templateOK(project)||len(version)>48||!versionPattern.MatchString(version){
   return nil,apiError{400,"프로젝트 또는 버전이 올바르지 않습니다."}
@@ -214,38 +255,9 @@ func (m *manager)installTemplate(ctx context.Context,id,project,version string,u
  }
  ctx,cancel:=context.WithTimeout(ctx,3*time.Minute);defer cancel()
  jar,err:=resolveJar(ctx,project,version);if err!=nil{return nil,err}
- validHash:=(jar.Algorithm=="sha256"&&shaPattern.MatchString(jar.Hash))||(jar.Algorithm=="md5"&&md5Pattern.MatchString(jar.Hash))
- if !validHash||jar.Size<0||jar.Size>256<<20||(jar.Size>0&&jar.Size<1024){
-  return nil,apiError{502,"공식 빌드 메타데이터가 올바르지 않습니다."}
- }
- download,err:=url.Parse(jar.URL)
- if err!=nil||!downloadAllowed(project,download,true){return nil,apiError{502,"공식 다운로드 주소가 아닙니다."}}
- var response *http.Response
- for hop:=0;;hop++{
-  req,err:=http.NewRequestWithContext(ctx,"GET",download.String(),nil);if err!=nil{return nil,err}
-  req.Header.Set("User-Agent","PConnPanel/0.2 (https://github.com/Pma10/Panel)")
-  response,err=officialClient.Do(req);if err!=nil{return nil,apiError{502,"JAR 다운로드에 실패했습니다."}}
-  if response.StatusCode<300||response.StatusCode>=400{break}
-  location,err:=download.Parse(response.Header.Get("Location"))
-  response.Body.Close()
-  if err!=nil||hop>=4||!downloadAllowed(project,location,false){return nil,apiError{502,"허용되지 않은 다운로드 리디렉션입니다."}}
-  download=location
- }
- defer response.Body.Close()
- if response.StatusCode!=200{return nil,apiError{502,"JAR 응답 오류"}}
- tmp:=filepath.Join(m.dir(id),".panel-"+makeID()+".download")
- out,err:=os.OpenFile(tmp,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600);if err!=nil{return nil,err}
- defer os.Remove(tmp)
- var digest hash.Hash=sha256.New()
- if jar.Algorithm=="md5"{digest=md5.New()}
- limit:=jar.Size
- if limit==0{limit=256<<20}
- size,copyErr:=io.Copy(io.MultiWriter(out,digest),io.LimitReader(response.Body,limit+1))
- syncErr:=out.Sync();closeErr:=out.Close()
- if copyErr!=nil{return nil,copyErr};if syncErr!=nil{return nil,syncErr};if closeErr!=nil{return nil,closeErr}
- if size>limit||(jar.Size>0&&size!=jar.Size)||size<1024||hex.EncodeToString(digest.Sum(nil))!=jar.Hash{
-  return nil,apiError{502,"다운로드한 JAR의 체크섬 또는 크기가 일치하지 않습니다."}
- }
+ tmp,size,err:=fetchVerified(ctx,jar,func(u *url.URL,first bool)bool{return downloadAllowed(project,u,first)},m.dir(id))
+ if tmp!=""{defer os.Remove(tmp)}
+ if err!=nil{return nil,err}
  // This mutation happens only after the complete JAR is hash-verified.
  // Keep one previous JAR on disk so an operator can roll back safely.
  previous:=filepath.Join(m.dir(id),".panel-previous.jar")

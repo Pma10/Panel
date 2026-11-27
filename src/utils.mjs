@@ -34,7 +34,7 @@ export function validateCommand(input) {
   if (/[\r\n\0]/.test(value)) return { valid: false, error: "여러 줄 명령은 허용하지 않습니다." };
   return { valid: true, value };
 }
-export const ROUTES = Object.freeze(["dashboard", "servers", "overview", "console", "files", "backups", "startup", "network", "schedules", "health", "users", "audit", "settings"]);
+export const ROUTES = Object.freeze(["dashboard", "servers", "overview", "console", "files", "plugins", "backups", "startup", "network", "schedules", "health", "users", "audit", "settings"]);
 export function routeFromHash(hash) {
   const path = String(hash || "").replace(/^#\/?/, "").replace(/^\/+/, "").split(/[?\/]/)[0];
   return ROUTES.includes(path) ? path : "dashboard";

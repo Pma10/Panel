@@ -203,6 +203,18 @@ func (a *panelAPI)filesRoute(w http.ResponseWriter,r *http.Request,id,route,acto
   if err:=a.manager.renameFile(id,input.From,input.To);err!=nil{return err}
   a.audit.append(actor,"PATCH /files/rename",id)
   jsonReply(w,200,map[string]bool{"renamed":true});return nil
+ case "files/plugins/search":
+  if err:=assertMethod(r,"GET");err!=nil{return err}
+  results,err:=a.manager.searchPlugins(r.Context(),id,r.URL.Query().Get("source"),r.URL.Query().Get("q"));if err!=nil{return err}
+  target,_:=a.manager.pluginTarget(id)
+  jsonReply(w,200,map[string]any{"results":results,"gameVersion":target.gameVersion});return nil
+ case "files/plugins/install":
+  if err:=assertMethod(r,"POST");err!=nil{return err}
+  var input struct{Source string `json:"source"`;ID string `json:"id"`}
+  if err:=decodeBody(r,&input);err!=nil{return err}
+  result,err:=a.manager.installPlugin(r.Context(),id,input.Source,input.ID);if err!=nil{return err}
+  a.audit.append(actor,"POST /plugins/install",id)
+  jsonReply(w,201,result);return nil
  case "files/extract":
   if err:=assertMethod(r,"POST");err!=nil{return err}
   var input struct{Path string `json:"path"`}

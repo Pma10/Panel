@@ -38,6 +38,9 @@ Docker도, 데이터베이스도, Node.js도 필요 없습니다.
 - 설치된 Java 자동 검색, `{java} {memory} {jar} {port}`로 실행 명령어 자유롭게 편집
 - 서버별 CPU·메모리 (Linux·Windows·macOS)
 
+**플러그인**
+- Modrinth·Hangar 검색 후 한 번에 설치. 서버 종류(Paper 계열·Folia·Velocity)와 Minecraft 버전에 맞는 정식 릴리스만, 체크섬(SHA-512/SHA-256) 확인
+
 **콘솔**
 - 실시간 로그, ANSI·`§` 색상과 수준별 색 구분, 최근 1000줄 스크롤
 - 위로 스크롤해도 화면이 튀지 않고, ↑/↓로 이전 명령 불러오기

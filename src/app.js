@@ -37,7 +37,8 @@ const iconPaths = {
   close: '<path d="M5 5 19 19M19 5 5 19"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20.2 15.6A8.5 8.5 0 0 1 8.4 3.8 8.5 8.5 0 1 0 20.2 15.6z"/>',
-  alert: '<path d="M12 3 2 21h20L12 3zM12 9v5m0 3h.01"/>'
+  alert: '<path d="M12 3 2 21h20L12 3zM12 9v5m0 3h.01"/>',
+  puzzle: '<path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3h7z"/>'
 };
 const icon = (name, cls = "") => `<svg class="icon ${cls}" viewBox="0 0 24 24" aria-hidden="true">${iconPaths[name] || iconPaths.more}</svg>`;
 const getStore = (key, fallback) => {
@@ -50,7 +51,7 @@ const state = {
   schedules: [...DEMO_SCHEDULES], mode: apiEnabled ? "live" : "demo",
   loading: apiEnabled, apiError: "", logError: "", logLoading: false,
   authenticated: !apiEnabled, authLoading: apiEnabled, authError: "", username:"", setupRequired:false, users:[],
-  javaInstalls:null, javaLoading:false, fileSelection:new Set(), fileAnchor:-1, stickLogs:true,
+  javaInstalls:null, javaLoading:false, plugins:{source:"modrinth",query:"",results:null,searching:false,installed:[],installing:"",gameVersion:""}, fileSelection:new Set(), fileAnchor:-1, stickLogs:true,
   commandHistory:getStore("pconn-command-history",[]), commandIndex:-1,
   query: "", serverQuery: "", serverPage: 0, serverStatus: "all", fileQuery: "", filePath: apiEnabled?"":"/home/minecraft/server", selectedFile: "",
   fileEntries: [], fileLoading:false, fileText:"", backups:[], backupLoading:false, viewRequest:0, viewError:"",
@@ -126,7 +127,7 @@ function renderServerRows(servers) {
 const AUDIT_LABELS = {
   "POST /actions/start":"서버 시작", "POST /actions/stop":"서버 중지", "POST /actions/restart":"재시작",
   "PATCH /startup":"시작 설정 변경", "POST /servers":"서버 생성", "POST /commands":"콘솔 명령",
-  "PUT /files/upload":"파일 업로드", "DELETE /files":"파일 삭제", "POST /files/mkdir":"폴더 생성", "PATCH /files/rename":"이름 변경", "POST /files/extract":"압축 풀기", "POST /files/compress":"압축",
+  "PUT /files/upload":"파일 업로드", "DELETE /files":"파일 삭제", "POST /files/mkdir":"폴더 생성", "PATCH /files/rename":"이름 변경", "POST /files/extract":"압축 풀기", "POST /files/compress":"압축", "POST /plugins/install":"플러그인 설치",
   "POST /backups":"백업 생성", "DELETE /backups":"백업 삭제", "POST /backups/restore":"백업 복원",
   "POST /install":"JAR 설치", "POST /install/upgrade":"JAR 업데이트", "POST /install/rollback":"JAR 롤백",
   "POST /schedules":"예약 추가", "DELETE /schedules":"예약 삭제", "PATCH /network":"포트 변경",
@@ -517,6 +518,47 @@ async function collectDropped(transfer){
   for(const entry of entries)await walk(entry,"");
   return out;
 }
+// Plugins: search Modrinth/Hangar for this server's platform and version,
+// install the verified JAR into plugins/. Installed list is plugins/*.jar.
+async function loadInstalledPlugins(){
+  if(state.mode!=="live"||!state.selectedId)return;
+  try{
+    const r=await apiRequest(fileApi("?path=plugins"));
+    state.plugins.installed=(r.entries||[]).filter(e=>e.type==="file"&&/\.jar$/i.test(e.name));
+  }catch{state.plugins.installed=[];}
+  if(state.route==="plugins")render();
+}
+async function searchPlugins(){
+  const p=state.plugins;p.searching=true;render();
+  try{
+    const r=await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/plugins/search?source="+p.source+"&q="+encodeURIComponent(p.query),{timeoutMs:30000});
+    p.results=r.results||[];p.gameVersion=r.gameVersion||"";
+  }catch(e){p.results=[];toast(e.message);}
+  finally{p.searching=false;if(state.route==="plugins")render();}
+}
+const fmtCount=(n)=>n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"K":String(n||0);
+function renderPlugins(){
+  if(state.mode!=="live")return renderUnconnected("플러그인","Modrinth·Hangar에서 플러그인 검색과 설치");
+  const s=server();
+  if(!s)return header("플러그인","")+emptyServer();
+  const p=state.plugins;
+  const results=p.results===null?'<div class="empty-state"><strong>플러그인 이름으로 검색하세요.</strong><p>빈 검색어로 찾으면 인기 플러그인이 나옵니다.</p></div>':
+    !p.results.length?'<div class="empty-state"><strong>검색 결과가 없습니다.</strong></div>':
+    p.results.map(r=>'<div class="plugin-row">'+
+      (r.icon?'<img class="plugin-icon" src="'+h(r.icon)+'" alt="" loading="lazy" referrerpolicy="no-referrer">':'<span class="plugin-icon">'+icon("puzzle")+'</span>')+
+      '<div class="plugin-info"><strong data-no-i18n>'+h(r.name)+'</strong><small data-no-i18n>'+h(r.author||"")+' · '+fmtCount(r.downloads)+' downloads</small><p data-no-i18n>'+h(r.description||"")+'</p></div>'+
+      button(p.installing===r.source+":"+r.id?"설치 중…":"설치","plugin-install","small primary",'data-source="'+h(r.source)+'" data-id="'+h(r.id)+'" '+(p.installing?'disabled':''))+'</div>').join("");
+  return header("플러그인",(s.kind||"")+(p.gameVersion?" · Minecraft "+p.gameVersion:"")+" 에 맞는 버전만 설치됩니다")+
+    '<div class="two-col plugins-layout"><section class="card"><form class="plugin-search" id="plugin-search-form">'+
+      '<div class="filter-tabs" role="group" aria-label="저장소">'+[["modrinth","Modrinth"],["hangar","Hangar"]].map(([k,l])=>
+        '<button type="button" class="filter-tab '+(p.source===k?'active':'')+'" data-action="plugin-source" data-source="'+k+'">'+l+'</button>').join("")+'</div>'+
+      '<label class="search-field">'+icon("search")+'<input class="field" id="plugin-query" name="q" placeholder="플러그인 검색 (예: LuckPerms)" value="'+h(p.query)+'" autocomplete="off"></label>'+
+      '<button class="btn primary" type="submit" '+(p.searching?'disabled':'')+'>'+(p.searching?'검색 중…':'검색')+'</button></form>'+
+      '<div class="plugin-results">'+results+'</div></section>'+
+    card("설치된 플러그인",'<div class="info-list">'+(p.installed.map(f=>'<div class="info-line"><div><strong class="mono" data-no-i18n>'+h(f.name)+'</strong><p>'+fileSize(f.size)+'</p></div>'+
+      button("삭제","plugin-delete","small danger",'data-name="'+h(f.name)+'"')+'</div>').join("")||'<div class="empty-state">설치된 플러그인이 없습니다.</div>')+'</div>'+
+      '<p class="hint plugin-hint">설치·삭제한 플러그인은 서버를 재시작하면 적용됩니다.</p>')+'</div>';
+}
 function renderLiveFiles(){
   if(!server())return header("파일","실제 서버 파일 시스템")+
     '<div class="card empty-state"><strong>먼저 서버를 생성하세요.</strong><p>서버 생성 후 JAR 파일을 업로드할 수 있습니다.</p><a class="btn" href="#/servers">서버 목록</a></div>';
@@ -570,6 +612,7 @@ async function refreshRouteData(){
   if(state.mode!=="live" || !state.authenticated)return;
   if(!state.selectedId && !["audit","settings","users","dashboard"].includes(state.route))return;
   if(state.route==="files"){await loadFiles();return;}
+  if(state.route==="plugins"){await loadInstalledPlugins();return;}
   const route=state.route;
   const endpoints={backups:"backups",startup:"startup",network:"network",schedules:"schedules",health:"health",audit:"audit",settings:"diagnostics",users:"users",dashboard:"audit"};
   if(!endpoints[route])return;
@@ -952,6 +995,7 @@ function renderPage() {
     case "overview": return renderOverview();
     case "console": return renderConsole();
     case "files": return renderFiles();
+    case "plugins": return renderPlugins();
     case "backups": return renderBackups();
     case "startup": return renderStartup();
     case "network": return renderNetwork();
@@ -1390,7 +1434,7 @@ async function switchSelectedServer(id,destination="overview") {
     state.selectedId = id;
     state.logs = state.mode === "demo" ? replaceLogHistory(DEMO_LOGS) : [];
     state.filePath = state.mode==="live"?"":"/home/minecraft/server";
-    state.fileEntries=[];state.selectedFile="";state.backups=[];state.startupLive=null;state.network=[];state.health=null;state.schedules=[];
+    state.fileEntries=[];state.selectedFile="";state.backups=[];state.plugins={...state.plugins,results:null,installed:[],gameVersion:""};state.startupLive=null;state.network=[];state.health=null;state.schedules=[];
     state.logError = "";
     state.logLoading = state.mode === "live";
     cancelLogUpdate();
@@ -1783,6 +1827,26 @@ document.addEventListener("click",async(event) => {
     if(!files.length)return toast("폴더는 먼저 압축한 뒤 받을 수 있습니다.");
     files.forEach((name,i)=>setTimeout(()=>downloadEntry(name),i*400));return;
   }
+  if (action==="plugin-source"){state.plugins.source=target.dataset.source;state.plugins.results=null;render();return;}
+  if (action==="plugin-install"){
+    const p=state.plugins,key=target.dataset.source+":"+target.dataset.id;p.installing=key;render();
+    try{
+      const r=await apiRequest("/servers/"+encodeURIComponent(state.selectedId)+"/plugins/install",{method:"POST",timeoutMs:200000,body:{source:target.dataset.source,id:target.dataset.id}});
+      toast("설치했습니다: "+r.file+" (서버를 재시작하면 적용)");
+    }catch(e){toast(e.message);}
+    p.installing="";await loadInstalledPlugins();return;
+  }
+  if (action==="plugin-delete"){
+    const name=target.dataset.name;
+    setModal({kind:"confirm",title:"'"+name+"'을(를) 삭제할까요?",description:"서버를 재시작하면 플러그인이 빠집니다. 플러그인 설정 폴더는 남겨 둡니다.",
+      paths:["plugins/"+name],confirmLabel:"삭제",confirmAction:"plugin-delete-run",danger:true});return;
+  }
+  if (action==="plugin-delete-run"){
+    const paths=state.modal?.paths||[];setModal(null);
+    try{for(const path of paths)await apiRequest(fileApi("?path="+encodeURIComponent(path)),{method:"DELETE"});toast("삭제했습니다.");}
+    catch(e){toast(e.message);}
+    await loadInstalledPlugins();return;
+  }
   if (action==="file-extract"){confirmExtract(target.dataset.name);return;}
   if (action==="file-extract-run"){
     const path=state.modal?.path;setModal(null);if(!path)return;
@@ -1966,7 +2030,7 @@ document.addEventListener("submit",async(event) => {
     finally{if(submit?.isConnected)submit.disabled=false;}
     return;
   }
-  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form","port-form","server-delete-form","file-compress-form"].includes(form.id))return;
+  if(!["console-form","startup-form","settings-form","schedule-form","create-server-form","file-editor-form","folder-create-form","file-rename-form","file-create-form","jar-upgrade-form","user-create-form","password-form","port-form","server-delete-form","file-compress-form","plugin-search-form"].includes(form.id))return;
   event.preventDefault();
   if(form.id==="jar-upgrade-form"){
     const template=state.startupLive?.template;
@@ -2003,6 +2067,7 @@ document.addEventListener("submit",async(event) => {
       if(form.id==="file-create-form")await openTextFile(name);else toast("완료되었습니다.");
     }catch(e){toast(e.message);}return;
   }
+  if(form.id==="plugin-search-form"){state.plugins.query=String(new FormData(form).get("q")||"").trim();await searchPlugins();return;}
   if(form.id==="file-compress-form"){
     const modal=state.modal,name=String(new FormData(form).get("name")||"").trim();if(!modal||!name)return;
     setModal(null);toast("압축하는 중입니다…");

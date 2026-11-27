@@ -192,6 +192,19 @@ export const EN = {
   "zip 파일을 읽을 수 없습니다.": "Cannot read the zip file.", "압축을 풀면 크기 제한(8GiB)을 넘습니다.": "Extracting would exceed the 8 GiB limit.",
   "압축할 항목을 선택하세요.": "Select items to zip.", "압축할 파일이 너무 많거나 큽니다 (최대 8GiB).": "Too many or too large files to zip (8 GiB max).",
 
+  // Plugins
+  "플러그인": "Plugins", "저장소": "Repository", "검색": "Search", "검색 중…": "Searching…", "설치": "Install", "설치 중…": "Installing…",
+  "플러그인 검색 (예: LuckPerms)": "Search plugins (e.g. LuckPerms)", "플러그인 이름으로 검색하세요.": "Search by plugin name.",
+  "빈 검색어로 찾으면 인기 플러그인이 나옵니다.": "An empty search lists popular plugins.", "설치된 플러그인": "Installed plugins",
+  "설치된 플러그인이 없습니다.": "No plugins installed.", "설치·삭제한 플러그인은 서버를 재시작하면 적용됩니다.": "Installs and removals apply after a server restart.",
+  "삭제했습니다.": "Deleted.", "플러그인 설치": "Plugin installed",
+  "서버를 재시작하면 플러그인이 빠집니다. 플러그인 설정 폴더는 남겨 둡니다.": "The plugin is removed on the next restart. Its config folder is kept.",
+  "이 서버 버전에서 쓸 수 있는 플러그인 파일이 없습니다.": "No file of this plugin runs on this server version.",
+  "외부 사이트에서만 받을 수 있는 플러그인이라 검증할 수 없어 설치하지 않습니다.": "This plugin is only available from an external site, so it cannot be verified and is not installed.",
+  "플러그인 ID가 올바르지 않습니다.": "Invalid plugin ID.", "지원하지 않는 플러그인 저장소입니다.": "Unsupported plugin repository.",
+  "Modrinth 응답을 해석할 수 없습니다.": "Could not read the Modrinth response.", "Hangar 응답을 해석할 수 없습니다.": "Could not read the Hangar response.",
+  "검색어가 너무 깁니다.": "The search is too long.",
+
   // Server error messages (Go backend)
   "비밀번호는 12자 이상이어야 합니다.": "Passwords must be at least 12 characters.", "비밀번호가 너무 깁니다.": "The password is too long.",
   "아이디는 3~32자의 영문, 숫자, _ - . 만 사용할 수 있습니다.": "Usernames are 3–32 letters, digits, _ - or .",
@@ -314,6 +327,9 @@ export const EN_PATTERNS = [
     "Another program is using port $1, so the server cannot start."],
   [/^'(.+)' 계정을 삭제할까요\?$/, "Delete account '$1'?"],
   [/^서버를 삭제했습니다: (.+)$/, "Deleted server $1"],
+  [/^설치했습니다: (.+) \(서버를 재시작하면 적용\)$/, "Installed $1 (applies after a restart)"],
+  [/^이미 같은 파일이 있습니다: (.+)$/, "$1 already exists."],
+  [/^(.*) 에 맞는 버전만 설치됩니다$/, "Only versions for $1 are installed"],
   [/^'(.+)' 압축을 풀까요\?$/, "Extract '$1'?"],
   [/^(\d+)개 파일의 압축을 풀었습니다\.$/, "Extracted $1 files."],
   [/^압축 파일을 만들었습니다: (.+)$/, "Created $1"],
