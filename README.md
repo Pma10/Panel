@@ -1,85 +1,91 @@
 <div align="center">
 
+**English** · [한국어](README.ko.md)
+
 # Panel
 
-**실행 파일 하나로 끝내는 Minecraft 서버 관리 패널**
+**A Minecraft server panel in a single executable**
 
-서버 실행·콘솔·파일·백업·네트워크를 브라우저 하나에서.<br />
-Docker도, 데이터베이스도, Node.js도 필요 없습니다.
+Run servers, console, files, plugins, backups and networking from one browser tab.<br />
+No Docker, no database, no Node.js.
 
 <p>
   <img src="https://img.shields.io/badge/Go-1.24%2B-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.24+" />
   <img src="https://img.shields.io/badge/Linux%20%C2%B7%20Windows%20%C2%B7%20macOS-243247?style=flat-square" alt="Linux · Windows · macOS" />
   <img src="https://img.shields.io/badge/Paper%20%C2%B7%20Purpur%20%C2%B7%20Leaf%20%C2%B7%20Folia%20%C2%B7%20Velocity-2f7d4f?style=flat-square" alt="Paper · Purpur · Leaf · Folia · Velocity" />
-  <img src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4%20%C2%B7%20English-6b5fd3?style=flat-square" alt="한국어 · English" />
+  <img src="https://img.shields.io/badge/English%20%C2%B7%20%ED%95%9C%EA%B5%AD%EC%96%B4-6b5fd3?style=flat-square" alt="English · 한국어" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square" alt="MIT License" /></a>
 </p>
 
-[빠른 시작](#빠른-시작) · [기능](#기능) · [화면](#화면) · [설정](#설정) · [운영](#linux-서비스로-운영) · [문서](#문서)
+[Quick start](#quick-start) · [Features](#features) · [Screenshots](#screenshots) · [Configuration](#configuration) · [Linux service](#run-as-a-linux-service) · [Docs](#documentation)
 
-<img src="docs/assets/dashboard.png" width="880" alt="Panel 대시보드: 실행 중인 서버, 접속 인원, 메모리, 최근 활동" />
+<img src="docs/assets/dashboard-en.png" width="880" alt="Panel dashboard: running servers, players, memory and recent activity" />
 
 </div>
 
 <br />
 
-## 왜 Panel인가요
+## Why Panel
 
-| 🪶 가볍게 | 🔌 끊기지 않게 | 🛡️ 안전하게 |
+| 🪶 Light | 🔌 Uninterrupted | 🛡️ Careful |
 | :--- | :--- | :--- |
-| 웹 UI까지 Go 실행 파일 하나에 들어 있습니다. 복사해서 실행하면 끝입니다. | 패널을 업데이트하거나 패널이 죽어도 **서버는 계속 돌아갑니다.** 다시 켜진 패널이 콘솔과 상태를 그대로 이어받습니다. | 공식 배포처의 JAR만 받아 체크섬을 확인하고, 서버 폴더 밖으로 나가는 파일 접근은 막습니다. |
+| The web UI ships inside one Go binary. Copy it and run it. | Update or restart the panel, or let it crash: **your servers keep running**, and the next panel picks up their console and status. | Server JARs and plugins come only from official sources and are checksum-verified; file access never leaves the server folder. |
 
-## 기능
+## Features
 
-**서버**
-- Paper · Purpur · Leaf · Folia · Velocity를 버전만 골라 설치·업데이트·롤백 (공식 배포처, SHA-256/MD5 검증). 그 밖의 JAR은 직접 업로드
-- 시작 중 → 실행 중 → 종료 중 → 재시작 대기 상태를 실제 서버 출력으로 판단
-- 서버가 꺼지면 자동으로 다시 켜기 (켜기/끄기, 10분에 최대 3회)
-- 설치된 Java 자동 검색, `{java} {memory} {jar} {port}`로 실행 명령어 자유롭게 편집
-- 서버별 CPU·메모리 (Linux·Windows·macOS)
+**Servers**
+- Install, update and roll back Paper · Purpur · Leaf · Folia · Velocity by picking a version (official sources, SHA-256/MD5 verified), or upload any JAR
+- Starting → running → stopping → restarting states read from the server's own output
+- Optional restart when a server exits (on/off, at most 3 times in 10 minutes)
+- Finds installed Java versions; fully editable launch command with `{java} {memory} {jar} {port}`
+- Per-server CPU and memory on Linux, Windows and macOS
 
-**플러그인**
-- Modrinth·Hangar 검색 후 한 번에 설치. 서버 종류(Paper 계열·Folia·Velocity)와 Minecraft 버전에 맞는 정식 릴리스만, 체크섬(SHA-512/SHA-256) 확인
+**Plugins**
+- Search Modrinth and Hangar and install in one click — only releases that match the server type (Paper family, Folia, Velocity) and Minecraft version, checksum-verified (SHA-512 / SHA-256)
 
-**콘솔**
-- 실시간 로그, ANSI·`§` 색상과 수준별 색 구분, 최근 1000줄 스크롤
-- 위로 스크롤해도 화면이 튀지 않고, ↑/↓로 이전 명령 불러오기
+**Console**
+- Live log with ANSI and `§` colors and per-level tints, 1,000 lines of scrollback
+- Scrolling up never jumps back down; ↑/↓ recalls previous commands
 
-**파일**
-- 서버가 켜져 있어도 편집·업로드
-- 더블클릭으로 열기, 바탕화면에서 파일·폴더 끌어다 놓기, 폴더로 끌어 이동, 다중 선택, 단축키
-- zip 압축·압축 풀기 (월드를 zip으로 올려 바로 풀기, 폴더를 zip으로 받기)
-- [Monaco](https://microsoft.github.io/monaco-editor/) 편집기 (YAML·JSON·properties 문법 강조, Ctrl+S)
+**Files**
+- Edit and upload while the server runs
+- Double-click to open, drag files and folders in from your desktop, drag onto folders to move, multi-select, keyboard shortcuts
+- Zip and unzip (upload a world as a zip, download folders as a zip)
+- [Monaco](https://microsoft.github.io/monaco-editor/) editor with YAML, JSON and `.properties` highlighting, Ctrl+S to save
 
-**네트워크 · 백업 · 예약**
-- 포트별 실제 열림 확인, 다른 서버·프로그램과의 충돌 경고, 접속 주소 복사, 게임 포트 변경
-- 서버를 끄지 않는 백업 (save-off/save-all), 복원, 매일·요일별 예약 백업·재시작
+**Backups · network · schedules**
+- Backups without stopping the server (`save-off` / `save-all`), restore, daily or weekly scheduled backups and restarts
+- Per-port reachability, conflict warnings, copyable connect addresses, game port changes
 
-**계정**
-- 여러 계정 로그인 (PBKDF2), 계정별 감사 기록, 한국어·English 화면
+**Accounts**
+- Multiple accounts (PBKDF2), per-account audit log, English and Korean UI
 
-## 화면
+## Screenshots
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/assets/console.png" alt="콘솔: 실시간 로그와 명령 입력" /><p align="center"><sub>콘솔 · 다크 테마</sub></p></td>
-    <td width="50%"><img src="docs/assets/files.png" alt="파일 관리자" /><p align="center"><sub>파일 관리자</sub></p></td>
+    <td width="50%"><img src="docs/assets/console.png" alt="Console with live log and command input" /><p align="center"><sub>Console · dark theme</sub></p></td>
+    <td width="50%"><img src="docs/assets/files.png" alt="File manager" /><p align="center"><sub>File manager</sub></p></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/assets/editor.png" alt="Monaco 편집기로 server.properties 편집" /><p align="center"><sub>Monaco 편집기</sub></p></td>
-    <td width="50%"><img src="docs/assets/network.png" alt="네트워크: 포트 상태와 접속 주소" /><p align="center"><sub>네트워크</sub></p></td>
+    <td width="50%"><img src="docs/assets/editor.png" alt="Editing server.properties in Monaco" /><p align="center"><sub>Monaco editor</sub></p></td>
+    <td width="50%"><img src="docs/assets/network.png" alt="Network: port status and connect addresses" /><p align="center"><sub>Network</sub></p></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/assets/startup.png" alt="시작 설정: Java 선택과 실행 명령어" /><p align="center"><sub>시작 설정 · Java 자동 검색</sub></p></td>
-    <td width="50%"><img src="docs/assets/dashboard-en.png" alt="English dashboard" /><p align="center"><sub>English</sub></p></td>
+    <td width="50%"><img src="docs/assets/startup.png" alt="Startup settings: Java selection and launch command" /><p align="center"><sub>Startup · Java detection</sub></p></td>
+    <td width="50%"><img src="docs/assets/dashboard.png" alt="Korean dashboard" /><p align="center"><sub>한국어</sub></p></td>
   </tr>
 </table>
 
-<sub>실제 Purpur·Velocity 서버를 띄워 찍은 화면입니다. IP 주소와 Java 경로는 예시 값으로 바꿨습니다.</sub>
+<sub>Taken with real Purpur and Velocity servers running. IP addresses and Java paths were replaced with example values.</sub>
 
-## 빠른 시작
+## Quick start
 
-**준비물:** [Go 1.24+](https://go.dev/dl/) (빌드할 때만), 서버 버전에 맞는 Java
+**You need:** Java for your Minecraft version. [Go 1.24+](https://go.dev/dl/) only if you build from source.
+
+**Download** the archive for your system from [Releases](https://github.com/Pma10/Panel/releases) (`pconn-linux-amd64.tar.gz`, `pconn-linux-arm64.tar.gz`, `pconn-windows-amd64.zip`), extract it and run `pconn` / `pconn.exe`.
+
+**Or build it:**
 
 ```bash
 git clone https://github.com/Pma10/Panel.git
@@ -88,80 +94,80 @@ go build -trimpath -ldflags="-s -w" -o panel .
 ./panel
 ```
 
-Windows에서는 `go build -o panel.exe .` 후 `.\panel.exe`를 실행합니다.
-
-1. 브라우저에서 **http://127.0.0.1:4173** 을 엽니다.
-2. **첫 계정**을 만듭니다 (아이디, 12자 이상 비밀번호).
-3. **서버 추가**에서 서버 종류와 버전을 고르면 JAR이 자동으로 설치됩니다.
-4. **서버 시작** → **콘솔**에서 `Done` 메시지가 뜨면 접속하면 됩니다.
-
-자세한 절차와 문제 해결은 [시작 가이드](docs/getting-started.md)에 있습니다.
+1. Open **http://127.0.0.1:4173**.
+2. Create the **first account** (username and a password of 12+ characters).
+3. **Add server**, pick a type and version — the JAR installs itself.
+4. **Start**, wait for `Done` in the **Console**, and connect.
 
 > [!TIP]
-> 기본 설정에서는 패널을 실행한 컴퓨터에서만 접속할 수 있습니다. 다른 곳에서 관리하려면 [HTTPS 리버스 프록시](docs/go-backend.md)를 앞에 두세요.
+> By default the panel only accepts connections from the machine it runs on. To manage it from elsewhere, put an [HTTPS reverse proxy](docs/go-backend.md) in front of it.
 
-## 설정
+**Forgot a password?** Stop the panel and run `pconn --reset-password <username>` (with the same `PANEL_DATA_DIR`). It prints a new random password.
 
-모두 환경 변수이며, 아무것도 설정하지 않아도 동작합니다.
+## Configuration
 
-| 변수 | 기본값 | 설명 |
+All settings are environment variables, and all of them are optional.
+
+| Variable | Default | Meaning |
 | :--- | :--- | :--- |
-| `PANEL_PORT` | `4173` | 관리 화면 포트 |
-| `PANEL_BIND_HOST` | `127.0.0.1` | 수신 주소. 로컬이 아니면 HTTPS 출처가 필요합니다 |
-| `PANEL_PUBLIC_ORIGIN` | `http://127.0.0.1:4173` | 브라우저가 접속하는 정확한 주소 (리버스 프록시 주소) |
-| `PANEL_DATA_DIR` | `./.panel-data` | 서버·월드·백업·계정·감사 기록 폴더 |
-| `PANEL_JAVA_BIN` | `java` | 서버별로 Java를 고르지 않았을 때 쓰는 Java |
-| `PANEL_ADMIN_PASSWORD` | — | 계정이 없을 때 `admin` 계정을 만들 비밀번호. 외부에서 접속 가능한 구성의 첫 실행에는 필수 |
-| `GOMEMLIMIT` | — | 패널(Go) 자체의 메모리 목표. Java 메모리와는 별개입니다 |
+| `PANEL_PORT` | `4173` | Port of the web UI |
+| `PANEL_BIND_HOST` | `127.0.0.1` | Listen address. Anything but loopback requires an HTTPS origin |
+| `PANEL_PUBLIC_ORIGIN` | `http://127.0.0.1:4173` | Exact address the browser uses (your reverse proxy URL) |
+| `PANEL_DATA_DIR` | `./.panel-data` | Servers, worlds, backups, accounts and audit log |
+| `PANEL_JAVA_BIN` | `java` | Java used when a server does not pick its own |
+| `PANEL_ADMIN_PASSWORD` | — | Creates an `admin` account when none exists. Required on the first start when the panel is reachable from other machines |
+| `GOMEMLIMIT` | — | Soft memory target for the panel itself (not for Java) |
 
-## Linux 서비스로 운영
+## Run as a Linux service
 
 ```bash
-# 테스트 → 빌드 → systemd 설치 (기존 설치면 업데이트)
+# test → build → install as a systemd service (or update an existing install)
 bash scripts/build-install-linux.sh
 
 sudo systemctl status pconn
 sudo journalctl -u pconn -n 100 --no-pager
 ```
 
-- 전용 비권한 계정(`pconn`)과 `/var/lib/pconn` 데이터 폴더를 사용합니다. 서비스 이름 `pconn`은 기존 설치와의 호환을 위해 유지합니다.
-- 패널을 재시작·업데이트해도 Minecraft 서버는 멈추지 않습니다 (`KillMode=process`).
-- 게시된 릴리스로 업데이트·롤백: `sudo bash scripts/pconnctl-linux.sh update vX.Y.Z` / `rollback`
-- Docker로 실행하려면 [`compose.yaml`](compose.yaml)과 [`.env.example`](.env.example)을 참고하세요.
+- Runs as a dedicated unprivileged `pconn` user with data in `/var/lib/pconn`.
+- Restarting or updating the panel does not stop Minecraft servers (`KillMode=process`).
+- Update or roll back to a published release: `sudo bash scripts/pconnctl-linux.sh update vX.Y.Z` / `rollback`.
+- For Docker, see [`compose.yaml`](compose.yaml) and [`.env.example`](.env.example).
 
-## 문서
+## Documentation
 
-| 문서 | 내용 |
+The guides are written in Korean.
+
+| Guide | Contents |
 | :--- | :--- |
-| [시작 가이드](docs/getting-started.md) | 첫 서버 만들기, JAR 업로드, 콘솔, 백업, 문제 해결 |
-| [운영·배포](docs/go-backend.md) | 환경 변수, 비권한 계정, systemd, 리버스 프록시 |
-| [구조](docs/architecture.md) | 파일별 역할, 서버 분리 실행과 재연결, 메모리 정책 |
-| [보안 정책](SECURITY.md) | 신뢰 경계, 운영 권장 사항, 취약점 제보 |
-| [기여 안내](CONTRIBUTING.md) | 개발 원칙과 검증 방법 |
+| [Getting started](docs/getting-started.md) | First server, uploads, console, backups, troubleshooting |
+| [Operations](docs/go-backend.md) | Environment, unprivileged user, systemd, reverse proxy |
+| [Architecture](docs/architecture.md) | What each file does, detached servers and reattachment, memory policy |
+| [Security](SECURITY.md) | Trust boundaries, recommendations, reporting vulnerabilities |
+| [Contributing](CONTRIBUTING.md) | Principles and how changes are checked |
 
-## 개발
+## Development
 
 ```bash
 go vet ./...
-go test ./...        # 백엔드 (Linux·Windows에서 실행)
-npm test             # 화면 렌더링·유틸리티 테스트 (Node 20+)
-npm run dev          # 백엔드 없이 예시 데이터로 화면만 미리보기
+go test ./...        # backend (runs on Linux and Windows)
+npm test             # UI rendering and utilities (Node 20+)
+npm run dev          # preview the UI with sample data, no backend
 ```
 
-백엔드는 표준 라이브러리만 쓰는 Go, 프런트엔드는 빌드 단계 없는 순수 JavaScript입니다. 화면 파일(`index.html`, `src/`)은 `go:embed`로 실행 파일에 들어갑니다.
+The backend uses only the Go standard library; the frontend is plain JavaScript with no build step. `index.html` and `src/` are embedded into the binary with `go:embed`. UI text is written in Korean and translated through `src/i18n-en.js`; adding a language means adding one dictionary file.
 
-## 주의사항
+## Good to know
 
 > [!WARNING]
-> **신뢰하는 JAR과 플러그인만 실행하세요.** 서버는 패널과 같은 OS 계정 권한으로 실행되며, 서버별 Docker·cgroup 격리는 없습니다. 모든 계정은 같은 권한을 가지고 실행 명령어도 바꿀 수 있습니다.
+> **Only run JARs and plugins you trust.** Servers run with the same OS account as the panel, with no per-server Docker or cgroup isolation. Every account has full rights, including changing launch commands.
 
-- 관리 포트(4173)를 인터넷에 직접 열지 말고 HTTPS 리버스 프록시 뒤에 두세요. Minecraft 게임 포트와는 별개입니다.
-- 백업은 서버가 켜진 채로 되지만, 복원은 서버를 멈춘 상태에서 합니다. 중요한 월드는 패널 데이터 폴더 밖에도 보관하세요.
-- 아직 없는 기능: 계정별 권한·2FA, SFTP, 멀티 노드, 원격 저장소 백업, TPS/MSPT 수집.
+- Do not expose the panel port (4173) to the internet directly; use an HTTPS reverse proxy. It is separate from the Minecraft game port.
+- Backups work while the server runs; restoring needs a stopped server. Keep important worlds outside the panel's data folder too.
+- Not included yet: per-account permissions or 2FA, SFTP, multiple nodes, off-site backups, TPS/MSPT tracking.
 
 ---
 
 <div align="center">
-<sub><a href="LICENSE">MIT License</a> · Panel은 Mojang Studios·Microsoft의 공식 제품이 아니며, PufferPanel·Pterodactyl과 무관한 별도 프로젝트입니다.</sub><br />
+<sub><a href="LICENSE">MIT License</a> · Panel is not affiliated with Mojang Studios or Microsoft, and is a separate project from PufferPanel and Pterodactyl.</sub><br />
 <sub><a href="https://github.com/fonts-archive/Paperlogy">Paperlogy</a> · <a href="https://github.com/heydamir/unslop">Unslop</a> by Damir Sokolovsky · <a href="https://github.com/microsoft/monaco-editor">Monaco Editor</a> (MIT)</sub>
 </div>
